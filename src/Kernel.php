@@ -16,7 +16,7 @@ class Kernel implements KernelContract
     /**
      * The Artisan application instance.
      *
-     * @var \Illuminate\Console\Application
+     * @var \Recca0120\Terminal\Application
      */
     protected $artisan;
 
@@ -30,13 +30,16 @@ class Kernel implements KernelContract
     /**
      * Create a new console kernel instance.
      *
+     * @param  \Recca0120\Terminal\Application  $artisan
      * @param  array  $config
      */
     public function __construct(Artisan $artisan, $config = [])
     {
         $this->artisan = $artisan;
         $this->config = Arr::except(array_merge([
-            'username' => 'LARAVEL', 'hostname' => php_uname('n'), 'os' => PHP_OS,
+            'username' => 'LARAVEL',
+            'hostname' => php_uname('n'),
+            'os' => PHP_OS,
         ], $config), ['enabled', 'whitelists', 'route', 'commands']);
     }
 
@@ -57,16 +60,17 @@ class Kernel implements KernelContract
      */
     public function bootstrap()
     {
+        // Bootstrap is handled automatically in Laravel 11+
     }
 
     /**
      * Handle an incoming console command.
      *
-     * @param  InputInterface  $input
-     * @param  OutputInterface  $output
+     * @param  \Symfony\Component\Console\Input\InputInterface  $input
+     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $output
      * @return int
      *
-     * @throws Exception
+     * @throws \Exception
      */
     public function handle($input, $output = null)
     {
@@ -79,10 +83,11 @@ class Kernel implements KernelContract
      * Run an Artisan console command by name.
      *
      * @param  string  $command
-     * @param  OutputInterface  $outputBuffer
+     * @param  array  $parameters
+     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $outputBuffer
      * @return int
      *
-     * @throws Exception
+     * @throws \Exception
      */
     public function call($command, array $parameters = [], $outputBuffer = null)
     {
@@ -95,7 +100,8 @@ class Kernel implements KernelContract
      * Queue an Artisan console command by name.
      *
      * @param  string  $command
-     * @return void
+     * @param  array  $parameters
+     * @return \Illuminate\Foundation\Bus\PendingDispatch|void
      */
     public function queue($command, array $parameters = [])
     {
@@ -105,11 +111,14 @@ class Kernel implements KernelContract
             return QueuedCommand::dispatch(func_get_args());
         }
 
+        // Fallback for older versions
         $app = $this->artisan->getLaravel();
-        $app[Queue::class]->push(
-            'Illuminate\Foundation\Console\QueuedJob',
-            func_get_args()
-        );
+        if ($app->bound(Queue::class)) {
+            $app[Queue::class]->push(
+                'Illuminate\Foundation\Console\QueuedJob',
+                func_get_args()
+            );
+        }
     }
 
     /**
@@ -139,19 +148,24 @@ class Kernel implements KernelContract
     /**
      * Terminate the application.
      *
-     * @param  InputInterface  $input
+     * @param  \Symfony\Component\Console\Input\InputInterface  $input
      * @param  int  $status
      * @return void
      */
     public function terminate($input, $status)
     {
         $this->bootstrap();
-        $this->artisan->terminate();
+
+        // Call terminate if method exists
+        if (method_exists($this->artisan, 'terminate')) {
+            $this->artisan->terminate();
+        }
     }
 
     /**
      * Set the Artisan commands provided by the application.
      *
+     * @param  array  $commands
      * @return $this
      */
     public function addCommands(array $commands)
@@ -164,23 +178,34 @@ class Kernel implements KernelContract
     /**
      * Set the paths that should have their Artisan commands automatically discovered.
      *
+     * @param  array  $paths
      * @return $this
      */
     public function addCommandPaths(array $paths)
     {
+        // This is a no-op in the terminal context
         return $this;
     }
 
     /**
      * Set the paths that should have their Artisan "routes" automatically discovered.
      *
+     * @param  array  $paths
      * @return $this
      */
     public function addCommandRoutePaths(array $paths)
     {
+        // This is a no-op in the terminal context
         return $this;
     }
 
+    /**
+     * Magic method to proxy calls to the underlying artisan application.
+     *
+     * @param  string  $name
+     * @param  array  $arguments
+     * @return mixed
+     */
     public function __call($name, $arguments)
     {
         $this->bootstrap();

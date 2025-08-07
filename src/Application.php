@@ -3,66 +3,213 @@
 namespace Recca0120\Terminal;
 
 use Exception;
-use Illuminate\Console\Application as ConsoleApplication;
-use Illuminate\Http\Request;
-use Recca0120\Terminal\Contracts\TerminalCommand;
-use Symfony\Component\Console\Formatter\OutputFormatter;
-use Symfony\Component\Console\Input\StringInput;
-use Symfony\Component\Console\Output\BufferedOutput;
+use Illuminate\Contracts\Console\Kernel as KernelContract;
+use Illuminate\Contracts\Queue\Queue;
+use Illuminate\Foundation\Console\QueuedCommand;
+use Illuminate\Support\Arr;
+use Recca0120\Terminal\Application as Artisan;
+use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
-class Application extends ConsoleApplication
+class Kernel implements KernelContract
 {
+    /**
+     * The Artisan application instance.
+     *
+     * @var \Recca0120\Terminal\Application
+     */
+    protected $artisan;
+
+    /**
+     * $config.
+     *
+     * @var array
+     */
+    protected $config;
+
+    /**
+     * Create a new console kernel instance.
+     *
+     * @param  \Recca0120\Terminal\Application  $artisan
+     * @param  array  $config
+     */
+    public function __construct(Artisan $artisan, $config = [])
+    {
+        $this->artisan = $artisan;
+        $this->config = Arr::except(array_merge([
+            'username' => 'LARAVEL',
+            'hostname' => php_uname('n'),
+            'os' => PHP_OS,
+        ], $config), ['enabled', 'whitelists', 'route', 'commands']);
+    }
+
+    /**
+     * getConfig.
+     *
+     * @return array
+     */
+    public function getConfig()
+    {
+        return $this->config;
+    }
+
+    /**
+     * Bootstrap the application for artisan commands.
+     *
+     * @return void
+     */
+    public function bootstrap()
+    {
+        // Bootstrap is handled automatically in Laravel 11+
+    }
+
+    /**
+     * Handle an incoming console command.
+     *
+     * @param  \Symfony\Component\Console\Input\InputInterface  $input
+     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $output
+     * @return int
+     *
+     * @throws \Exception
+     */
+    public function handle($input, $output = null)
+    {
+        $this->bootstrap();
+
+        return $this->artisan->run($input, $output);
+    }
+
     /**
      * Run an Artisan console command by name.
      *
      * @param  string  $command
-     * @param  OutputInterface  $outputBuffer
+     * @param  array  $parameters
+     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $outputBuffer
      * @return int
      *
-     * @throws Exception
+     * @throws \Exception
      */
     public function call($command, array $parameters = [], $outputBuffer = null)
     {
-        if ($this->ajax() === true) {
-            $this->lastOutput = $outputBuffer ?: new BufferedOutput(BufferedOutput::VERBOSITY_NORMAL, true, new OutputFormatter(true));
-            $this->setCatchExceptions(true);
-        } else {
-            $this->lastOutput = $outputBuffer ?: new BufferedOutput();
-            $this->setCatchExceptions(false);
+        $this->bootstrap();
+
+        return $this->artisan->call($command, $parameters, $outputBuffer);
+    }
+
+    /**
+     * Queue an Artisan console command by name.
+     *
+     * @param  string  $command
+     * @param  array  $parameters
+     * @return \Illuminate\Foundation\Bus\PendingDispatch|void
+     */
+    public function queue($command, array $parameters = [])
+    {
+        $this->bootstrap();
+
+        if (class_exists(QueuedCommand::class)) {
+            return QueuedCommand::dispatch(func_get_args());
         }
 
-        $command .= ' '.implode(' ', $parameters);
-        $input = new StringInput($command);
-        $input->setInteractive(false);
-        $result = $this->run($input, $this->lastOutput);
-        $this->setCatchExceptions(true);
-
-        return $result;
+        // Fallback for older versions
+        $app = $this->artisan->getLaravel();
+        if ($app->bound(Queue::class)) {
+            $app[Queue::class]->push(
+                'Illuminate\Foundation\Console\QueuedJob',
+                func_get_args()
+            );
+        }
     }
 
     /**
-     * Resolve an array of commands through the application.
+     * Get all of the commands registered with the console.
      *
-     * @param  array|mixed  $commands
+     * @return array
+     */
+    public function all()
+    {
+        $this->bootstrap();
+
+        return $this->artisan->all();
+    }
+
+    /**
+     * Get the output for the last run command.
+     *
+     * @return string
+     */
+    public function output()
+    {
+        $this->bootstrap();
+
+        return $this->artisan->output();
+    }
+
+    /**
+     * Terminate the application.
+     *
+     * @param  \Symfony\Component\Console\Input\InputInterface  $input
+     * @param  int  $status
+     * @return void
+     */
+    public function terminate($input, $status)
+    {
+        $this->bootstrap();
+
+        // Call terminate if method exists
+        if (method_exists($this->artisan, 'terminate')) {
+            $this->artisan->terminate();
+        }
+    }
+
+    /**
+     * Set the Artisan commands provided by the application.
+     *
+     * @param  array  $commands
      * @return $this
      */
-    public function resolveCommands($commands)
+    public function addCommands(array $commands)
     {
-        return parent::resolveCommands(array_filter($commands, static function ($command) {
-            return is_subclass_of($command, TerminalCommand::class);
-        }));
+        $this->artisan->addCommands($commands);
+
+        return $this;
     }
 
     /**
-     * ajax.
+     * Set the paths that should have their Artisan commands automatically discovered.
      *
-     * @return bool
+     * @param  array  $paths
+     * @return $this
      */
-    private function ajax()
+    public function addCommandPaths(array $paths)
     {
-        $request = $this->laravel['request'] ?: Request::capture();
+        // This is a no-op in the terminal context
+        return $this;
+    }
 
-        return $request->ajax();
+    /**
+     * Set the paths that should have their Artisan "routes" automatically discovered.
+     *
+     * @param  array  $paths
+     * @return $this
+     */
+    public function addCommandRoutePaths(array $paths)
+    {
+        // This is a no-op in the terminal context
+        return $this;
+    }
+
+    /**
+     * Magic method to proxy calls to the underlying artisan application.
+     *
+     * @param  string  $name
+     * @param  array  $arguments
+     * @return mixed
+     */
+    public function __call($name, $arguments)
+    {
+        $this->bootstrap();
+
+        return call_user_func_array([$this->artisan, $name], $arguments);
     }
 }

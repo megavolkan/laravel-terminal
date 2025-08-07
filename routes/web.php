@@ -2,26 +2,23 @@
 
 /*
 |--------------------------------------------------------------------------
-| Application Routes
+| Terminal Routes
 |--------------------------------------------------------------------------
 |
-| Here is where you can register all of the routes for an application.
-| It's a breeze. Simply tell Laravel the URIs it should respond to
-| and give it the controller to call when that URI is requested.
+| Here are the routes for the Laravel Terminal package.
+| These routes are automatically registered by the TerminalServiceProvider.
 |
 */
 
-Route::get('/{view?}', [
-    'as' => 'index',
-    'uses' => 'TerminalController@index',
-]);
+use Illuminate\Support\Facades\Route;
+use Recca0120\Terminal\Http\Controllers\TerminalController;
 
-Route::post('/endpoint', [
-    'as' => 'endpoint',
-    'uses' => 'TerminalController@endpoint',
-]);
+Route::get('/{view?}', [TerminalController::class, 'index'])
+    ->name('index');
 
-Route::get('/media/{file}', [
-    'as' => 'media',
-    'uses' => 'TerminalController@media',
-])->where(['file' => '.+']);
+Route::post('/endpoint', [TerminalController::class, 'endpoint'])
+    ->name('endpoint');
+
+Route::get('/media/{file}', [TerminalController::class, 'media'])
+    ->name('media')
+    ->where('file', '.+');
