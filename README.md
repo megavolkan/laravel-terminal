@@ -1,218 +1,126 @@
- [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=YNNLC9V28YDPN)
+# Laravel Terminal - Enhanced Version
 
-# Laravel Terminal
+Laravel 11/12 compatible web terminal with full Composer support and Filament authentication.
 
-[![StyleCI](https://styleci.io/repos/45892521/shield?style=flat)](https://styleci.io/repos/45892521)
-[![Build Status](https://travis-ci.org/recca0120/laravel-terminal.svg)](https://travis-ci.org/recca0120/laravel-terminal)
-[![Total Downloads](https://poser.pugx.org/recca0120/terminal/d/total.svg)](https://packagist.org/packages/recca0120/terminal)
-[![Latest Stable Version](https://poser.pugx.org/recca0120/terminal/v/stable.svg)](https://packagist.org/packages/recca0120/terminal)
-[![Latest Unstable Version](https://poser.pugx.org/recca0120/terminal/v/unstable.svg)](https://packagist.org/packages/recca0120/terminal)
-[![License](https://poser.pugx.org/recca0120/terminal/license.svg)](https://packagist.org/packages/recca0120/terminal)
-[![Monthly Downloads](https://poser.pugx.org/recca0120/terminal/d/monthly)](https://packagist.org/packages/recca0120/terminal)
-[![Daily Downloads](https://poser.pugx.org/recca0120/terminal/d/daily)](https://packagist.org/packages/recca0120/terminal)
-[![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/recca0120/laravel-terminal/badges/quality-score.png?b=master)](https://scrutinizer-ci.com/g/recca0120/laravel-terminal/?branch=master)
-[![Code Coverage](https://scrutinizer-ci.com/g/recca0120/laravel-terminal/badges/coverage.png?b=master)](https://scrutinizer-ci.com/g/recca0120/laravel-terminal/?branch=master)
+## Features
+
+- ✅ Laravel 11/12 compatibility
+- ✅ Full Composer support (all commands)
+- ✅ Smart Tinker with auto-fixes for quotes and namespaces
+- ✅ Filament authentication integration
+- ✅ Shared hosting compatible
+- ✅ No SSH required
 
 ## Installation
 
-```bash
-composer require recca0120/terminal --dev
-```
-
-OR
-
-Add Presenter to your composer.json file:
-
-```js
-"require-dev": {
-    "recca0120/terminal": "^1.6.8"
-}
-```
-Now, run a composer update on the command line from the root of your project:
-
-```
-composer update
-```
-
-### Registering the Package
-
-Include the service provider within `app/config/app.php`. The service povider is needed for the generator artisan command.
-
-```php
-'providers' => [
-    ...
-    Recca0120\Terminal\TerminalServiceProvider::class,
-    ...
-];
-```
-
-publish
-
-```php
-artisan vendor:publish --provider="Recca0120\Terminal\TerminalServiceProvider"
-```
-
-
-### URL
-
-http://localhost/path/to/terminal
-
-### config
-
-```php
-return [
-    'enabled'    => env('APP_DEBUG'),
-    'whitelists' => ['127.0.0.1', 'your ip'],
-    'route'     => [
-        'prefix'     => 'terminal',
-        'as'         => 'terminal.',
-        // if you use laravel 5.1, remember to remove web middleware
-        'middleware' => ['web'],
-        // if you need auth, you need use web and auth middleware
-        // 'middleware' => ['web', 'auth']
-    ],
-    'commands' => [
-        \Recca0120\Terminal\Console\Commands\Artisan::class,
-        \Recca0120\Terminal\Console\Commands\ArtisanTinker::class,
-        \Recca0120\Terminal\Console\Commands\Cleanup::class,
-        \Recca0120\Terminal\Console\Commands\Find::class,
-        \Recca0120\Terminal\Console\Commands\Mysql::class,
-        \Recca0120\Terminal\Console\Commands\Tail::class,
-        \Recca0120\Terminal\Console\Commands\Vi::class,
-        // add your command
-    ],
-];
-
-```
-
-## Available Commands
-
-* artisan
-* artisan tinker
-* find
-* mysql
-* tail
-* vi
-
-### Find
-
-not full support, but you can delete file use this function (please check file permission)
+### 1. Install Package
 
 ```bash
-find ./vendor -name tests -type d -maxdepth 4 -delete
+composer config repositories.enhanced-terminal vcs https://github.com/megavolkan/laravel-terminal
+composer require recca0120/terminal:dev-master
 ```
 
-## Add Your Command
+### 2. Publish Configuration
 
-### Add Command Class
+```bash
+php artisan vendor:publish --provider="Recca0120\Terminal\TerminalServiceProvider"
+```
+
+### 3. Create Filament Auth Middleware
+
+```bash
+php artisan make:middleware FilamentTerminalAuth
+```
+
+Add this content to `app/Http/Middleware/FilamentTerminalAuth.php`:
+
 ```php
-// src/Console/Commands/Mysql.php
+<?php
 
-namespace Recca0120\Terminal\Console\Commands;
+namespace App\Http\Middleware;
 
-use Illuminate\Console\Command;
-use Illuminate\Foundation\Inspiring;
-use Recca0120\Terminal\Contracts\TerminalCommand;
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
-class Inspire extends Command implements TerminalCommand
+class FilamentTerminalAuth
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
-    protected $signature = 'inspire';
-
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Display an inspiring quote';
-
-    /**
-     * Execute the console command.
-     *
-     * @return mixed
-     */
-    public function handle()
+    public function handle(Request $request, Closure $next): Response
     {
-        $this->comment(PHP_EOL.Inspiring::quote().PHP_EOL);
+        if (!auth()->check()) {
+            return redirect('/admin/login');
+        }
+
+        $user = auth()->user();
+        
+        // Optional: Add role/permission checks
+        /*
+        if (!$user->hasRole('admin')) {
+            return response('Access denied to terminal', 403);
+        }
+        */
+
+        return $next($request);
     }
 }
 ```
 
-## ScreenShot
+### 4. Register Middleware
 
-### Available Commands
-```bash
-$ help
+In `bootstrap/app.php`, add:
+
+```php
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->alias([
+        'filament.terminal' => \App\Http\Middleware\FilamentTerminalAuth::class,
+    ]);
+})
 ```
-![Available Commands](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/available-commands.png)
 
-### Artisan List
-```bash
-$ artisan
+### 5. Update Terminal Config
+
+In `config/terminal.php`, set:
+
+```php
+'route' => [
+    'prefix' => 'terminal',
+    'as' => 'terminal.',
+    'middleware' => ['web', 'filament.terminal'],
+],
 ```
-![Artisan List](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/artisan-list.png)
 
-### Migrate
+### 6. For Shared Hosting
+
+Upload `composer.phar` to your project root:
+
 ```bash
-$ artisan migrate --seed
+curl -o composer.phar https://getcomposer.org/composer.phar
 ```
-![Migrate](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/artisan-migrate.png)
 
-### Artisan Tinker
-```bash
-$ artisan tinker
-```
-![Tinker](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/artisan-tinker.png)
+## Usage
 
-### MySQL
-```bash
-$ mysql
-mysql> select * from users;
+- Access terminal at: `/terminal`
+- Must be logged into Filament admin panel first
+- All Composer commands available: `composer install`, `composer update`, etc.
+- Smart Tinker: `tinker User::count()`, `tinker config(app.name)`
 
-# change connection
-mysql> use sqlite;
-mysql> select * from users;
-```
-![MySQL Command](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/mysql-command.png)
+## Security
 
-### Find Command
-```bash
-$ find ./ -name * -maxdepth 1
-```
-![Find Command](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/find-command.png)
+- Requires Filament authentication
+- Add role/permission checks in middleware as needed
+- Safe for shared hosting environments
 
-### Find and Delete
-```bash
-$ find ./storage/logs -name * -maxdepth 1 -delete
-```
-![Find and Delete](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/find-and-delete.png)
+## Commands Available
 
-### Vi
-```bash
-$ vi server.php
-```
-![Vi Command](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/vi-command.png)
+- **Artisan**: All Laravel artisan commands
+- **Tinker**: Interactive PHP with smart auto-corrections
+- **Composer**: Full Composer functionality
+- **System**: find, tail, cleanup, vi, mysql
 
-![Vi Editor](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/vi-editor.png)
+## Troubleshooting
 
-![Vi Save](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/vi-save.png)
+If Composer commands fail, ensure `composer.phar` is in your project root or Composer is installed on the server.
 
-### Tail
-```bash
-$ tail
-$ tail --line=1
-$ tail server.php
-$ tail server.php --line 5
-```
-![Tail Command](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/tail-command.png)
+## Credits
 
-
-### Cleanup
-```bash
-$ cleanup
-```
-![Cleanup Command](https://cdn.rawgit.com/recca0120/terminal/master/docs/screenshots/cleanup-command.png)
+Enhanced version of [recca0120/laravel-terminal](https://github.com/recca0120/laravel-terminal) with Laravel 11/12 compatibility and additional features.
