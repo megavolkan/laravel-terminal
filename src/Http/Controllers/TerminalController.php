@@ -188,6 +188,7 @@ class TerminalController extends Controller
             '/^queue:restart/',
             '/^storage:link/',
             '/^optimize/',
+            '/^make:/',  // Allow all make commands
             // Add more patterns as needed
         ];
 
