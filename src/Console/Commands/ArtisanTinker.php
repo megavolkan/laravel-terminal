@@ -465,7 +465,10 @@ class ArtisanTinker extends Command implements TerminalCommand
         return '
             $__captured_vars = [];
             foreach (get_defined_vars() as $__var_name => $__var_value) {
-                if (!in_array($__var_name, ["__captured_vars", "__var_name", "__var_value", "__result"])) {
+                // Only capture user-defined variables (not our internal ones)
+                if (preg_match("/^[a-zA-Z][a-zA-Z0-9_]*$/", $__var_name) && 
+                    !in_array($__var_name, ["__captured_vars", "__var_name", "__var_value", "__result", 
+                                           "code", "variables", "contextCode", "isAssignment", "fullCode"])) {
                     $__captured_vars[$__var_name] = $__var_value;
                 }
             }
@@ -491,22 +494,12 @@ class ArtisanTinker extends Command implements TerminalCommand
     {
         $storedVars = [];
         
-        // Filter out internal variables
-        $filteredVariables = [];
+        $this->line('<fg=gray>Debug: Storing ' . count($variables) . ' user variables</fg=gray>');
+        if (!empty($variables)) {
+            $this->line('<fg=gray>Debug: Variables: ' . implode(', ', array_keys($variables)) . '</fg=gray>');
+        }
+        
         foreach ($variables as $name => $value) {
-            // Only store user-defined variables (starting with letter, not internal)
-            if (preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $name) && 
-                !in_array($name, ['app', 'artisan', 'kernel', 'events', 'config'])) {
-                $filteredVariables[$name] = $value;
-            }
-        }
-        
-        $this->line('<fg=gray>Debug: Filtering ' . count($variables) . ' variables to ' . count($filteredVariables) . ' user variables</fg=gray>');
-        if (!empty($filteredVariables)) {
-            $this->line('<fg=gray>Debug: Storing: ' . implode(', ', array_keys($filteredVariables)) . '</fg=gray>');
-        }
-        
-        foreach ($filteredVariables as $name => $value) {
             $storedVars[$name] = [
                 'type' => gettype($value),
                 'display' => $this->getDisplayValue($value),
