@@ -371,8 +371,7 @@ class ArtisanTinker extends Command implements TerminalCommand
             
             if ($isAssignment) {
                 // For assignments, execute and capture new variables
-                $fullCode = $contextCode . "\n" . $code . ";\n" . $this->getVariableCaptureCode();
-            } else {
+                $fullCode = $contextCode . "\n" . $code . ";\n" . $this->getVariableCaptureCode() . "\nreturn ['result' => null, 'variables' => \$__captured_vars];";            } else {
                 // For expressions, return the result but also capture variables
                 $fullCode = $contextCode . "\n\$__result = " . $code . ";\n" . $this->getVariableCaptureCode() . "\nreturn ['result' => \$__result, 'variables' => \$__captured_vars];";
             }
@@ -398,6 +397,9 @@ class ArtisanTinker extends Command implements TerminalCommand
                 $this->line('<fg=gray>Debug: Updating ' . count($result['variables']) . ' variables</fg=gray>');
                 $this->updateStoredVariables($result['variables']);
                 $result = $result['result'] ?? null;
+            } elseif ($isAssignment) {
+                // For assignments that didn't return properly, try to update anyway
+                $this->line('<fg=gray>Debug: Assignment result was not properly captured</fg=gray>');
             }
 
             // Display the result
