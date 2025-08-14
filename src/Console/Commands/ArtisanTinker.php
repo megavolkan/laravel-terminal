@@ -191,7 +191,7 @@ class ArtisanTinker extends Command implements TerminalCommand
      */
     protected function showHelp()
     {
-        $this->line('<fg=cyan>Laravel Terminal Tinker Mode - With Persistent Variables v2.2.0</fg=cyan>');
+        $this->line('<fg=cyan>Laravel Terminal Tinker Mode - With Persistent Variables v2.3.0</fg=cyan>');
         $this->line('');
         $this->line('<fg=yellow>Variables now persist between commands!</fg=yellow>');
         $this->line('');
@@ -358,16 +358,11 @@ class ArtisanTinker extends Command implements TerminalCommand
             // Get stored variables
             $variables = $this->getStoredVariables();
 
-            // Debug output
-            $this->line('<fg=gray>Debug: Found ' . count($variables) . ' stored variables</fg=gray>');
-
             // Build the execution context with existing variables
             $contextCode = $this->buildExecutionContext($variables);
             
             // Determine if this is an assignment or expression
             $isAssignment = $this->isAssignment($code);
-            
-            $this->line('<fg=gray>Debug: Is assignment: ' . ($isAssignment ? 'yes' : 'no') . '</fg=gray>');
             
             if ($isAssignment) {
                 // For assignments, execute and capture new variables
@@ -375,8 +370,6 @@ class ArtisanTinker extends Command implements TerminalCommand
                 // For expressions, return the result but also capture variables
                 $fullCode = $contextCode . "\n\$__result = " . $code . ";\n" . $this->getVariableCaptureCode() . "\nreturn ['result' => \$__result, 'variables' => \$__captured_vars];";
             }
-
-            $this->line('<fg=gray>Debug: Executing code with context</fg=gray>');
 
             // Capture output
             ob_start();
@@ -394,12 +387,11 @@ class ArtisanTinker extends Command implements TerminalCommand
 
             // Handle variable updates
             if (is_array($result) && isset($result['variables'])) {
-                $this->line('<fg=gray>Debug: Updating ' . count($result['variables']) . ' variables</fg=gray>');
                 $this->updateStoredVariables($result['variables']);
                 $result = $result['result'] ?? null;
             } elseif ($isAssignment) {
                 // For assignments that didn't return properly, try to update anyway
-                $this->line('<fg=gray>Debug: Assignment result was not properly captured</fg=gray>');
+                // This is a fallback case that shouldn't normally happen
             }
 
             // Display the result
@@ -413,7 +405,6 @@ class ArtisanTinker extends Command implements TerminalCommand
             }
 
             $this->line('<fg=red>' . get_class($e) . '</fg=red>: <fg=white>' . $e->getMessage() . '</fg=white>');
-            $this->line('<fg=gray>Debug: Error occurred, variables not updated</fg=gray>');
             return null;
         }
     }
@@ -446,11 +437,6 @@ class ArtisanTinker extends Command implements TerminalCommand
         }
         
         $contextCode = implode("\n", $context);
-        
-        // Debug output
-        if (!empty($context)) {
-            $this->line('<fg=gray>Debug: Restoring variables: ' . implode(', ', array_keys($variables)) . '</fg=gray>');
-        }
         
         return $contextCode;
     }
@@ -493,11 +479,6 @@ class ArtisanTinker extends Command implements TerminalCommand
     protected function updateStoredVariables($variables)
     {
         $storedVars = [];
-        
-        $this->line('<fg=gray>Debug: Storing ' . count($variables) . ' user variables</fg=gray>');
-        if (!empty($variables)) {
-            $this->line('<fg=gray>Debug: Variables: ' . implode(', ', array_keys($variables)) . '</fg=gray>');
-        }
         
         foreach ($variables as $name => $value) {
             $storedVars[$name] = [
