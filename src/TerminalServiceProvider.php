@@ -145,6 +145,8 @@ class TerminalServiceProvider extends ServiceProvider
     }
 
     /**
+     * Check if terminal access is allowed
+     *
      * @param  \Illuminate\Http\Request  $request
      * @param  array  $config
      * @return bool
@@ -152,15 +154,21 @@ class TerminalServiceProvider extends ServiceProvider
     private function allowWhiteList(Request $request, $config)
     {
         $enabled = Arr::get($config, 'enabled', false);
-        $whitelists = Arr::get($config, 'whitelists', []);
-
-        // If enabled is true, allow all
-        if ($enabled) {
+        
+        // If explicitly disabled, deny access
+        if ($enabled === false) {
+            return false;
+        }
+        
+        // If enabled is true, allow access
+        if ($enabled === true) {
             return true;
         }
-
-        // Check IP whitelist
+        
+        // If enabled is not explicitly set, check IP whitelist
+        $whitelists = Arr::get($config, 'whitelists', []);
         $clientIp = $request->getClientIp();
+        
         return in_array($clientIp, $whitelists, true);
     }
 }

@@ -1,8 +1,15 @@
 <?php
 
 return [
-    'enabled' => env('APP_DEBUG', true),
-    'whitelists' => ['127.0.0.1', '::1', '10.0.2.2', '192.168.1.1'], // Add your local IPs
+    // Enable/disable the terminal completely
+    // true = always enabled
+    // false = always disabled  
+    // env('APP_DEBUG', false) = enabled only when APP_DEBUG is true
+    'enabled' => env('APP_DEBUG', false),
+    
+    // IP addresses allowed to access terminal (only used if 'enabled' is not explicitly true/false)
+    'whitelists' => ['127.0.0.1', '::1', '10.0.2.2', '192.168.1.1'],
+    
     'route' => [
         'prefix' => 'terminal',
         'as' => 'terminal.',
@@ -17,5 +24,6 @@ return [
         \Recca0120\Terminal\Console\Commands\Tail::class,
         \Recca0120\Terminal\Console\Commands\Vi::class,
         \Recca0120\Terminal\Console\Commands\Composer::class, // Added Composer support
+        \Recca0120\Terminal\Console\Commands\Npm::class, // Added NPM support
     ],
 ];
