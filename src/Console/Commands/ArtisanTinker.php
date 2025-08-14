@@ -445,7 +445,14 @@ class ArtisanTinker extends Command implements TerminalCommand
             }
         }
         
-        return implode("\n", $context);
+        $contextCode = implode("\n", $context);
+        
+        // Debug output
+        if (!empty($context)) {
+            $this->line('<fg=gray>Debug: Restoring variables: ' . implode(', ', array_keys($variables)) . '</fg=gray>');
+        }
+        
+        return $contextCode;
     }
 
     /**
@@ -484,7 +491,22 @@ class ArtisanTinker extends Command implements TerminalCommand
     {
         $storedVars = [];
         
+        // Filter out internal variables
+        $filteredVariables = [];
         foreach ($variables as $name => $value) {
+            // Only store user-defined variables (starting with letter, not internal)
+            if (preg_match('/^[a-zA-Z][a-zA-Z0-9_]*$/', $name) && 
+                !in_array($name, ['app', 'artisan', 'kernel', 'events', 'config'])) {
+                $filteredVariables[$name] = $value;
+            }
+        }
+        
+        $this->line('<fg=gray>Debug: Filtering ' . count($variables) . ' variables to ' . count($filteredVariables) . ' user variables</fg=gray>');
+        if (!empty($filteredVariables)) {
+            $this->line('<fg=gray>Debug: Storing: ' . implode(', ', array_keys($filteredVariables)) . '</fg=gray>');
+        }
+        
+        foreach ($filteredVariables as $name => $value) {
             $storedVars[$name] = [
                 'type' => gettype($value),
                 'display' => $this->getDisplayValue($value),
