@@ -136,6 +136,11 @@ class ArtisanTinker extends Command implements TerminalCommand
                 $this->getOutput()->write('<fg=magenta>>>> </fg=magenta>');
                 return true;
 
+            case 'debug':
+                $this->showDebugInfo();
+                $this->getOutput()->write('<fg=magenta>>>> </fg=magenta>');
+                return true;
+
             case '':
                 return false; // Let it show help
 
@@ -145,11 +150,48 @@ class ArtisanTinker extends Command implements TerminalCommand
     }
 
     /**
+     * Show debug information
+     */
+    protected function showDebugInfo()
+    {
+        $this->line('<fg=cyan>Debug Information:</fg=cyan>');
+        $this->line('Session ID: ' . $this->sessionId);
+        $this->line('Cache Key: ' . $this->cacheKey);
+        $this->line('Cache Driver: ' . config('cache.default'));
+        
+        // Test cache functionality
+        $testKey = 'tinker_test_' . time();
+        $testValue = 'test_works';
+        
+        try {
+            Cache::put($testKey, $testValue, 60);
+            $retrieved = Cache::get($testKey);
+            
+            if ($retrieved === $testValue) {
+                $this->line('<fg=green>✅ Cache is working</fg=green>');
+            } else {
+                $this->line('<fg=red>❌ Cache test failed</fg=red>');
+            }
+            
+            Cache::forget($testKey);
+        } catch (\Exception $e) {
+            $this->line('<fg=red>❌ Cache error: ' . $e->getMessage() . '</fg=red>');
+        }
+        
+        $variables = $this->getStoredVariables();
+        $this->line('Stored variables count: ' . count($variables));
+        
+        if (!empty($variables)) {
+            $this->line('Variable names: ' . implode(', ', array_keys($variables)));
+        }
+    }
+
+    /**
      * Show help information
      */
     protected function showHelp()
     {
-        $this->line('<fg=cyan>Laravel Terminal Tinker Mode - With Persistent Variables</fg=cyan>');
+        $this->line('<fg=cyan>Laravel Terminal Tinker Mode - With Persistent Variables v2.2.0</fg=cyan>');
         $this->line('');
         $this->line('<fg=yellow>Variables now persist between commands!</fg=yellow>');
         $this->line('');
@@ -168,6 +210,7 @@ class ArtisanTinker extends Command implements TerminalCommand
         $this->line('');
         $this->line('<fg=green>Special commands:</fg=green>');
         $this->line('  <fg=white>vars</fg=white>                        Show stored variables');
+        $this->line('  <fg=white>debug</fg=white>                       Show debug information');
         $this->line('  <fg=white>clear</fg=white>                       Clear all variables');
         $this->line('  <fg=white>exit</fg=white>                        Exit and clear variables');
         $this->line('');
@@ -315,26 +358,26 @@ class ArtisanTinker extends Command implements TerminalCommand
             // Get stored variables
             $variables = $this->getStoredVariables();
 
+            // Debug output
+            $this->line('<fg=gray>Debug: Found ' . count($variables) . ' stored variables</fg=gray>');
+
             // Build the execution context with existing variables
             $contextCode = $this->buildExecutionContext($variables);
             
             // Determine if this is an assignment or expression
             $isAssignment = $this->isAssignment($code);
             
+            $this->line('<fg=gray>Debug: Is assignment: ' . ($isAssignment ? 'yes' : 'no') . '</fg=gray>');
+            
             if ($isAssignment) {
                 // For assignments, execute and capture new variables
                 $fullCode = $contextCode . "\n" . $code . ";\n" . $this->getVariableCaptureCode();
             } else {
-                // For expressions, return the result
-                if (!preg_match('/^(return\s|echo\s|print\s|var_dump\s|dump\s)/i', $code) &&
-                    !preg_match('/^<\?php/', $code) &&
-                    !preg_match('/^(if|for|foreach|while|switch|try|class|function|namespace)\s/i', $code)
-                ) {
-                    $fullCode = $contextCode . "\nreturn " . $code . ";";
-                } else {
-                    $fullCode = $contextCode . "\n" . $code . ";";
-                }
+                // For expressions, return the result but also capture variables
+                $fullCode = $contextCode . "\n\$__result = " . $code . ";\n" . $this->getVariableCaptureCode() . "\nreturn ['result' => \$__result, 'variables' => \$__captured_vars];";
             }
+
+            $this->line('<fg=gray>Debug: Executing code with context</fg=gray>');
 
             // Capture output
             ob_start();
@@ -350,8 +393,9 @@ class ArtisanTinker extends Command implements TerminalCommand
                 $this->line($output);
             }
 
-            // Handle variable updates for assignments
-            if ($isAssignment && isset($result['variables'])) {
+            // Handle variable updates
+            if (is_array($result) && isset($result['variables'])) {
+                $this->line('<fg=gray>Debug: Updating ' . count($result['variables']) . ' variables</fg=gray>');
                 $this->updateStoredVariables($result['variables']);
                 $result = $result['result'] ?? null;
             }
@@ -367,6 +411,7 @@ class ArtisanTinker extends Command implements TerminalCommand
             }
 
             $this->line('<fg=red>' . get_class($e) . '</fg=red>: <fg=white>' . $e->getMessage() . '</fg=white>');
+            $this->line('<fg=gray>Debug: Error occurred, variables not updated</fg=gray>');
             return null;
         }
     }
@@ -411,11 +456,10 @@ class ArtisanTinker extends Command implements TerminalCommand
         return '
             $__captured_vars = [];
             foreach (get_defined_vars() as $__var_name => $__var_value) {
-                if (!in_array($__var_name, ["__captured_vars", "__var_name", "__var_value"])) {
+                if (!in_array($__var_name, ["__captured_vars", "__var_name", "__var_value", "__result"])) {
                     $__captured_vars[$__var_name] = $__var_value;
                 }
             }
-            return ["variables" => $__captured_vars, "result" => isset($result) ? $result : null];
         ';
     }
 
