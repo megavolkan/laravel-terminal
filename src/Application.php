@@ -27,10 +27,10 @@ class Application extends ConsoleApplication
     {
         if ($this->ajax() === true) {
             $this->lastOutput = $outputBuffer ?: new BufferedOutput(BufferedOutput::VERBOSITY_NORMAL, true, new OutputFormatter(true));
-            $this->setCatchExceptions(true);
+            $this->setCatchThrowablesOrExceptions(true);
         } else {
             $this->lastOutput = $outputBuffer ?: new BufferedOutput();
-            $this->setCatchExceptions(false);
+            $this->setCatchThrowablesOrExceptions(false);
         }
 
         // Build command string more safely
@@ -64,7 +64,7 @@ class Application extends ConsoleApplication
             }
             $result = 1;
         } finally {
-            $this->setCatchExceptions(true);
+            $this->setCatchThrowablesOrExceptions(true);
         }
 
         return $result;
@@ -97,6 +97,18 @@ class Application extends ConsoleApplication
         }
 
         return '';
+    }
+
+    /**
+     * Symfony 7.2+ uses setCatchThrowables(), older versions use setCatchExceptions().
+     */
+    private function setCatchThrowablesOrExceptions(bool $catch): void
+    {
+        if (method_exists($this, 'setCatchThrowables')) {
+            $this->setCatchThrowables($catch);
+        } else {
+            $this->setCatchExceptions($catch);
+        }
     }
 
     /**

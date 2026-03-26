@@ -184,6 +184,7 @@ class TerminalController extends Controller
             '/^config:clear/',
             '/^view:clear/',
             '/^migrate:status/',
+            '/^migrate:rollback/',
             '/^queue:work/',
             '/^queue:restart/',
             '/^storage:link/',

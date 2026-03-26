@@ -11,13 +11,6 @@ use Exception;
 class TerminalServiceProvider extends ServiceProvider
 {
     /**
-     * namespace.
-     *
-     * @var string
-     */
-    protected $namespace = 'Recca0120\Terminal\Http\Controllers';
-
-    /**
      * Bootstrap any application services.
      */
     public function boot()
@@ -95,9 +88,7 @@ class TerminalServiceProvider extends ServiceProvider
     {
         // Laravel 12 compatible route caching check
         if (!$this->routesCached()) {
-            $routeConfig = array_merge([
-                'namespace' => $this->namespace,
-            ], Arr::get($config, 'route', []));
+            $routeConfig = Arr::get($config, 'route', []);
 
             $router->group($routeConfig, function () {
                 require __DIR__ . '/../routes/web.php';
