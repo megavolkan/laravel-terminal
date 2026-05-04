@@ -102,7 +102,7 @@ export class Terminal {
         this.term.pause(true);
 
         this.spinner.start((frame: string) => {
-            this.term.set_prompt(`${this.prompt()}${frame}`);
+            this.term.set_prompt(`${this.contextPrompt()}${frame}`);
         });
 
         command
@@ -111,7 +111,7 @@ export class Terminal {
                 this.spinner.stop();
                 this.term.resume();
                 this.term.focus();
-                this.term.set_prompt(this.prompt());
+                this.term.set_prompt(this.contextPrompt());
                 if (this.outputFormatter.is(error)) {
                     this.term.echo(error);
                 } else {
@@ -126,10 +126,22 @@ export class Terminal {
                 this.spinner.stop();
                 this.term.resume();
                 this.term.focus();
-                this.term.set_prompt(this.prompt());
+                this.term.set_prompt(this.contextPrompt());
                 this.term.echo(result);
                 this.term.scroll_to_bottom();
             });
+    }
+
+    private contextPrompt(): string {
+        if (this.term && this.term.level && this.term.level() > 1) {
+            const levelName: string = this.term.name();
+            const interpreterCmd = this.commands.find(c => c.interpreterable(levelName));
+            if (interpreterCmd) {
+                return interpreterCmd.getInterpreter().prompt;
+            }
+        }
+
+        return this.prompt();
     }
 
     private async confirm(message: string, title: string = '', cancel: string = ''): Promise<any> {
