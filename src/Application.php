@@ -71,6 +71,19 @@ class Application extends ConsoleApplication
     }
 
     /**
+     * Add an array of commands to the console.
+     * Overrides parent to handle string class names, which Laravel 12+ no longer resolves automatically.
+     *
+     * @param  array  $commands
+     * @return void
+     */
+    #[\Override]
+    public function addCommands(array $commands): void
+    {
+        $this->resolveCommands($commands);
+    }
+
+    /**
      * Resolve an array of commands through the application.
      *
      * @param  array|mixed  $commands
@@ -78,11 +91,18 @@ class Application extends ConsoleApplication
      */
     public function resolveCommands($commands)
     {
-        $validCommands = array_filter($commands, static function ($command) {
-            return is_subclass_of($command, TerminalCommand::class);
-        });
+        $commands = is_array($commands) ? $commands : func_get_args();
 
-        return parent::resolveCommands($validCommands);
+        foreach ($commands as $command) {
+            if (!is_subclass_of($command, TerminalCommand::class)) {
+                continue;
+            }
+
+            $instance = is_string($command) ? $this->laravel->make($command) : $command;
+            $this->add($instance);
+        }
+
+        return $this;
     }
 
     /**
