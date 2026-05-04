@@ -1,4 +1,5 @@
-import cliSpinners, { Spinner as CliSpinner, SpinnerName } from 'cli-spinners';
+import * as cliSpinners from 'cli-spinners';
+import type { Spinner as CliSpinner, SpinnerName } from 'cli-spinners';
 
 export class Spinner {
     private spinner: CliSpinner = cliSpinners.dots;
