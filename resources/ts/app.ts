@@ -21,6 +21,7 @@ export class Terminal {
     private spinner = new Spinner();
     private commands: Command[] = [];
     private term: any;
+    private activeInterpreterPrompt: string | null = null;
 
     constructor(elementId: string, private options: any) {
         this.element = <HTMLElement>document.querySelector(elementId);
@@ -59,15 +60,19 @@ export class Terminal {
             (command: Command): boolean => {
                 if (command.is(cmd) === true) {
                     if (command.interpreterable(cmd) === true) {
+                        const interpreter = command.getInterpreter();
+                        this.activeInterpreterPrompt = interpreter.prompt;
+
                         this.term.push((cmd: string, term: any) => {
                             if (['exit', 'quit'].indexOf(cmd) !== -1) {
+                                this.activeInterpreterPrompt = null;
                                 term.pop();
 
                                 return;
                             }
 
                             this.run(`${term.name()} ${cmd}`);
-                        }, command.getInterpreter());
+                        }, interpreter);
 
                         return true;
                     }
@@ -133,12 +138,8 @@ export class Terminal {
     }
 
     private contextPrompt(): string {
-        if (this.term && this.term.level && this.term.level() > 1) {
-            const levelName: string = this.term.name();
-            const interpreterCmd = this.commands.find(c => c.interpreterable(levelName));
-            if (interpreterCmd) {
-                return interpreterCmd.getInterpreter().prompt;
-            }
+        if (this.activeInterpreterPrompt !== null) {
+            return this.activeInterpreterPrompt;
         }
 
         return this.prompt();
