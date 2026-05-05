@@ -49,6 +49,23 @@ class Composer extends Command implements TerminalCommand
     }
 
     /**
+     * Check whether the required shell functions are available.
+     */
+    protected function shellFunctionsAvailable(): bool
+    {
+        $required = ['exec', 'shell_exec', 'proc_open'];
+        $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
+
+        foreach ($required as $fn) {
+            if (in_array($fn, $disabled) || !function_exists($fn)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
      * Execute Composer command with full access
      *
      * @param string $command
@@ -56,6 +73,12 @@ class Composer extends Command implements TerminalCommand
      */
     protected function executeComposerCommand($command)
     {
+        if (!$this->shellFunctionsAvailable()) {
+            $this->error('Shell functions (exec, shell_exec, proc_open) are disabled on this server.');
+            $this->line('Composer commands require shell access which is not available on this hosting environment.');
+            return;
+        }
+
         // Find composer executable
         $composerPath = $this->findComposerOnSharedHost();
 
@@ -193,18 +216,20 @@ class Composer extends Command implements TerminalCommand
         }
 
         // Strategy 2: Try to use 'which' if available
-        $whichResult = @shell_exec('which composer 2>/dev/null');
-        if (!empty($whichResult)) {
-            $composerPath = trim($whichResult);
-            if (is_executable($composerPath)) {
-                return escapeshellarg($composerPath);
+        if (function_exists('shell_exec')) {
+            $whichResult = @shell_exec('which composer 2>/dev/null');
+            if (!empty($whichResult)) {
+                $composerPath = trim($whichResult);
+                if (is_executable($composerPath)) {
+                    return escapeshellarg($composerPath);
+                }
             }
-        }
 
-        // Strategy 3: Check if composer is in PATH by trying to run it
-        $testOutput = @shell_exec('composer --version 2>/dev/null');
-        if (!empty($testOutput) && strpos($testOutput, 'Composer') !== false) {
-            return 'composer'; // It's in PATH
+            // Strategy 3: Check if composer is in PATH by trying to run it
+            $testOutput = @shell_exec('composer --version 2>/dev/null');
+            if (!empty($testOutput) && strpos($testOutput, 'Composer') !== false) {
+                return 'composer'; // It's in PATH
+            }
         }
 
         // Strategy 4: Try common shared hosting paths
