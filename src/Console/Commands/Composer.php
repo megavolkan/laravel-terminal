@@ -53,7 +53,7 @@ class Composer extends Command implements TerminalCommand
      */
     protected function shellFunctionsAvailable(): bool
     {
-        $required = ['exec', 'shell_exec', 'proc_open'];
+        $required = ['exec', 'shell_exec', 'proc_open', 'escapeshellarg', 'escapeshellcmd'];
         $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
 
         foreach ($required as $fn) {
