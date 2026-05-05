@@ -33,20 +33,21 @@ class Application extends ConsoleApplication
             $this->setCatchThrowablesOrExceptions(false);
         }
 
-        // Build command string more safely
+        // Build command string — StringInput handles its own parsing so we
+        // must NOT use escapeshellarg() here (it also may be disabled on
+        // shared hosting). Wrap values containing spaces in double quotes.
         $commandString = $command;
         if (!empty($parameters)) {
-            // Special handling for tinker command - DON'T add --command= prefix
             if ($command === 'tinker' && count($parameters) > 0) {
-                // For tinker, pass the code directly as --command option value
                 $tinkCommand = $parameters[0];
-                $commandString = 'tinker --command=' . escapeshellarg($tinkCommand);
+                $quoted = '"' . str_replace('"', '\\"', $tinkCommand) . '"';
+                $commandString = 'tinker --command=' . $quoted;
             } else {
-                // For other commands, add parameters normally
                 foreach ($parameters as $parameter) {
                     if (is_string($parameter)) {
-                        // Escape parameters that contain spaces
-                        $parameter = escapeshellarg($parameter);
+                        $parameter = strpos($parameter, ' ') !== false
+                            ? '"' . str_replace('"', '\\"', $parameter) . '"'
+                            : $parameter;
                         $commandString .= ' ' . $parameter;
                     }
                 }
