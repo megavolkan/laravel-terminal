@@ -100,7 +100,7 @@ class TerminalController extends Controller
                         'data' => $kernel->output()
                     ]
                 ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $attributes = [
                 'jsonrpc' => $request->get('jsonrpc'),
                 'id' => null,

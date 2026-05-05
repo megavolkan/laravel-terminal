@@ -58,8 +58,8 @@ class Application extends ConsoleApplication
             $input = new StringInput($commandString);
             $input->setInteractive(false);
             $result = $this->run($input, $this->lastOutput);
-        } catch (Exception $e) {
-            // Handle exceptions more gracefully
+        } catch (\Throwable $e) {
+            // Handle exceptions and fatal errors gracefully
             if ($this->lastOutput instanceof BufferedOutput) {
                 $this->lastOutput->write('Error: ' . $e->getMessage());
             }
