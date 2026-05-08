@@ -34,7 +34,7 @@ class TerminalServiceProvider extends ServiceProvider
             if ($this->app->runningInConsole() === true) {
                 $this->handlePublishes();
             }
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             // Log error for debugging but don't break the app
             if (function_exists('logger')) {
                 logger()->error('Terminal Service Provider Boot Error: ' . $e->getMessage());
