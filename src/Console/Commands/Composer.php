@@ -20,24 +20,22 @@ class Composer extends Command implements TerminalCommand
      *
      * @var string
      */
-    protected $description = 'Run Composer commands - Full Access';
+    protected $description = 'Run Composer commands';
 
     /**
      * Execute the console command.
      *
      * @return mixed
      */
-    public function handle()
+    public function handle(): int
     {
         $command = trim($this->option('command') ?? '');
 
-        // If no command provided, show help
         if (empty($command)) {
             $this->showHelp();
             return 0;
         }
 
-        // Execute any composer command
         try {
             $this->executeComposerCommand($command);
         } catch (Exception $e) {
@@ -49,359 +47,192 @@ class Composer extends Command implements TerminalCommand
     }
 
     /**
-     * Check whether the required shell functions are available.
+     * Sanitize a composer command string — allow only safe characters.
+     * Never use escapeshellarg/escapeshellcmd (disabled on shared hosting).
      */
-    protected function shellFunctionsAvailable(): bool
+    protected function sanitizeCommand(string $command): string
     {
-        $required = ['exec', 'shell_exec', 'proc_open', 'escapeshellarg', 'escapeshellcmd'];
-        $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
-
-        foreach ($required as $fn) {
-            if (in_array($fn, $disabled) || !function_exists($fn)) {
-                return false;
-            }
-        }
-
-        return true;
+        // Allow: letters, digits, spaces, hyphens, colons, slashes, dots, equals, carets, tildes, @
+        // Block: semicolons, pipes, backticks, $, >, <, &, (, ), {, }, newlines, null bytes
+        return preg_replace('/[^a-zA-Z0-9 \-:\/\.\=\^\~\@\_\*]/', '', $command);
     }
 
     /**
-     * Execute Composer command with full access
-     *
-     * @param string $command
-     * @throws Exception
+     * Find an executable PHP CLI binary on the server.
      */
-    protected function executeComposerCommand($command)
+    protected function findPhpBinary(): string
     {
-        if (!$this->shellFunctionsAvailable()) {
-            $this->error('Shell functions (exec, shell_exec, proc_open) are disabled on this server.');
-            $this->line('Composer commands require shell access which is not available on this hosting environment.');
-            return;
-        }
-
-        // Find composer executable
-        $composerPath = $this->findComposerOnSharedHost();
-
-        if (!$composerPath) {
-            $this->showComposerNotFoundHelp();
-            return;
-        }
-
-        // Set working directory to Laravel root
-        $workingDir = base_path();
-
-        // Build the command - properly escaped for paths with spaces
-        // Note: $composerPath is already escaped in findComposerOnSharedHost()
-        $fullCommand = $composerPath . ' ' . escapeshellcmd($command) . ' --no-ansi 2>&1';
-
-        $this->line('<fg=blue>Using:</fg=blue> ' . str_replace(['"', "'"], '', $composerPath));
-        $this->line('<fg=blue>Executing:</fg=blue> ' . $command);
-        $this->line('<fg=yellow>Working Directory:</fg=yellow> ' . $workingDir);
-        $this->line('');
-
-        // Execute with output streaming
-        $output = '';
-        $returnCode = 0;
-
-        // Change to project directory
-        $oldDir = getcwd();
-        chdir($workingDir);
-
-        try {
-            // For long-running commands, we need to stream output
-            if ($this->isLongRunningCommand($command)) {
-                $this->line('<fg=yellow>⏳ This may take a while...</fg=yellow>');
-                $this->streamCommandOutput($fullCommand);
-            } else {
-                // Quick commands can use exec
-                exec($fullCommand, $outputArray, $returnCode);
-                $output = implode("\n", $outputArray);
-
-                if (!empty($output)) {
-                    $this->displayOutput($output);
-                } else {
-                    $this->line('<fg=yellow>Command executed but produced no output.</fg=yellow>');
-                }
-            }
-        } catch (Exception $e) {
-            throw new Exception('Failed to execute composer: ' . $e->getMessage());
-        } finally {
-            // Restore original directory
-            chdir($oldDir);
-        }
-
-        if ($returnCode !== 0 && !$this->isLongRunningCommand($command)) {
-            $this->error("Command exited with code: $returnCode");
-        } else {
-            $this->line('<fg=green>✅ Command completed</fg=green>');
-        }
-    }
-
-    /**
-     * Stream output for long-running commands
-     *
-     * @param string $command
-     */
-    protected function streamCommandOutput($command)
-    {
-        $descriptorspec = [
-            0 => ['pipe', 'r'],  // stdin
-            1 => ['pipe', 'w'],  // stdout
-            2 => ['pipe', 'w']   // stderr
+        $candidates = [
+            PHP_BINARY,
+            '/usr/local/bin/php',
+            '/usr/bin/php',
+            '/opt/cpanel/ea-php83/root/usr/bin/php',
+            '/opt/cpanel/ea-php82/root/usr/bin/php',
+            '/opt/cpanel/ea-php81/root/usr/bin/php',
         ];
 
-        $process = proc_open($command, $descriptorspec, $pipes);
-
-        if (is_resource($process)) {
-            fclose($pipes[0]); // Close stdin
-
-            // Read output in real-time
-            while (($line = fgets($pipes[1])) !== false) {
-                $this->line(rtrim($line));
-            }
-
-            // Read any errors
-            while (($line = fgets($pipes[2])) !== false) {
-                $this->line('<fg=red>' . rtrim($line) . '</fg=red>');
-            }
-
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-        }
-    }
-
-    /**
-     * Check if command is long-running
-     *
-     * @param string $command
-     * @return bool
-     */
-    protected function isLongRunningCommand($command)
-    {
-        $longRunningCommands = [
-            'install',
-            'update',
-            'require',
-            'remove',
-            'create-project',
-            'dump-autoload',
-            'self-update',
-            'global require',
-            'global update'
-        ];
-
-        foreach ($longRunningCommands as $longCommand) {
-            if (strpos($command, $longCommand) !== false) {
-                return true;
+        foreach ($candidates as $path) {
+            if (is_executable($path) && strpos($path, 'fpm') === false) {
+                return $path;
             }
         }
 
-        return false;
-    }
-
-    /**
-     * Find Composer on shared hosting or local development
-     *
-     * @return string|false
-     */
-    protected function findComposerOnSharedHost()
-    {
-        // Strategy 1: Check if there's a local composer.phar in the project
-        $localComposer = base_path('composer.phar');
-        if (file_exists($localComposer)) {
-            // Find the correct CLI PHP binary (not FPM)
-            $phpBinary = $this->findCliPhpBinary();
-            return escapeshellarg($phpBinary) . ' ' . escapeshellarg($localComposer);
-        }
-
-        // Strategy 2: Try to use 'which' if available
-        if (function_exists('shell_exec')) {
-            $whichResult = @shell_exec('which composer 2>/dev/null');
-            if (!empty($whichResult)) {
-                $composerPath = trim($whichResult);
-                if (is_executable($composerPath)) {
-                    return escapeshellarg($composerPath);
-                }
-            }
-
-            // Strategy 3: Check if composer is in PATH by trying to run it
-            $testOutput = @shell_exec('composer --version 2>/dev/null');
-            if (!empty($testOutput) && strpos($testOutput, 'Composer') !== false) {
-                return 'composer'; // It's in PATH
-            }
-        }
-
-        // Strategy 4: Try common shared hosting paths
-        $commonPaths = [
-            '/usr/local/bin/composer',
-            '/usr/bin/composer',
-            '/bin/composer',
-            '/opt/cpanel/composer/bin/composer', // cPanel
-            '/home/composer/composer.phar',      // Some shared hosts
-            // Add Homebrew paths for local development
-            '/opt/homebrew/bin/composer',        // Apple Silicon Mac
-            '/usr/local/bin/composer',           // Intel Mac
-        ];
-
-        foreach ($commonPaths as $path) {
-            if (is_executable($path)) {
-                return escapeshellarg($path);
-            }
-        }
-
-        // Strategy 5: Look for PHP and try to download composer.phar if we have write permissions
-        if (is_writable(base_path())) {
-            $this->line('<fg=yellow>Composer not found. Attempting to download composer.phar...</fg=yellow>');
-            return $this->downloadComposerPhar();
-        }
-
-        return false;
-    }
-
-    /**
-     * Find the CLI PHP binary (not FPM)
-     *
-     * @return string
-     */
-    protected function findCliPhpBinary()
-    {
-        // If current PHP_BINARY is FPM, find the CLI version
-        if (strpos(PHP_BINARY, 'fpm') !== false) {
-            // For Herd on macOS, try to find the CLI version
-            $phpVersion = PHP_MAJOR_VERSION . PHP_MINOR_VERSION; // e.g., "83"
-
-            $cliPaths = [
-                // Herd CLI paths
-                str_replace('php' . $phpVersion . '-fpm', 'php' . $phpVersion, PHP_BINARY),
-                str_replace('-fpm', '', PHP_BINARY),
-
-                // System paths
-                '/usr/bin/php',
-                '/usr/local/bin/php',
-                '/opt/homebrew/bin/php',
-
-                // Herd alternative paths
-                '/Users/' . get_current_user() . '/Library/Application Support/Herd/bin/php' . $phpVersion,
-
-                // Generic
-                'php'
-            ];
-
-            foreach ($cliPaths as $path) {
-                if (is_executable($path)) {
-                    // Test if it's CLI (not FPM)
-                    $test = @shell_exec(escapeshellarg($path) . ' --version 2>/dev/null');
-                    if (!empty($test) && strpos($test, 'PHP') !== false && strpos($test, 'fpm') === false) {
-                        return $path;
-                    }
-                }
-            }
-        }
-
-        // Fallback: try the current PHP_BINARY anyway
+        // Fallback: current binary even if FPM
         return PHP_BINARY;
     }
 
     /**
-     * Download composer.phar
-     *
-     * @return string|false
+     * Find composer.phar in common locations.
      */
-    protected function downloadComposerPhar()
+    protected function findComposerPhar(): ?string
     {
+        $locations = [
+            base_path('composer.phar'),
+            base_path('../composer.phar'),
+            '/usr/local/bin/composer',
+            '/usr/bin/composer',
+            '/opt/homebrew/bin/composer',
+        ];
+
+        foreach ($locations as $path) {
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Execute the composer command.
+     * Tries multiple strategies: popen → passthru → proc_open → exec → shell_exec.
+     */
+    protected function executeComposerCommand(string $command): void
+    {
+        $composerPath = $this->findComposerPhar();
+
+        if (!$composerPath) {
+            $this->line('<fg=red>❌ composer.phar not found.</fg=red>');
+            $this->line('Upload composer.phar to: <fg=yellow>' . base_path() . '</fg=yellow>');
+            $this->line('Download from: https://getcomposer.org/composer.phar');
+            return;
+        }
+
+        $phpBin  = $this->findPhpBinary();
+        $safeCmd = $this->sanitizeCommand($command);
+
+        if (empty($safeCmd)) {
+            $this->error('Invalid command characters.');
+            return;
+        }
+
+        $fullCommand = $phpBin . ' ' . $composerPath . ' ' . $safeCmd . ' --no-ansi 2>&1';
+
+        $this->line('<fg=yellow>⏳ Running composer ' . $safeCmd . '...</fg=yellow>');
+        $this->line('');
+
+        $oldDir = getcwd();
+        chdir(base_path());
+
         try {
-            $composerPharPath = base_path('composer.phar');
+            $output = $this->runCommand($fullCommand);
 
-            // Download composer installer
-            $installer = file_get_contents('https://getcomposer.org/installer');
-            if (!$installer) {
-                return false;
+            if ($output === null) {
+                $this->error('No shell execution method available on this server.');
+                $this->line('Disabled: exec, shell_exec, proc_open, popen, passthru, system');
+            } else {
+                foreach (explode("\n", rtrim($output)) as $line) {
+                    $this->line($line);
+                }
+                $this->line('');
+                $this->line('<fg=green>✅ Done</fg=green>');
             }
-
-            // Run installer to create composer.phar
-            $tempInstaller = base_path('composer-installer.php');
-            file_put_contents($tempInstaller, $installer);
-
-            $phpBinary = escapeshellarg($this->findCliPhpBinary());
-            $installerPath = escapeshellarg($tempInstaller);
-            $output = shell_exec($phpBinary . ' ' . $installerPath . ' 2>&1');
-            unlink($tempInstaller);
-
-            if (file_exists($composerPharPath)) {
-                $this->line('<fg=green>✅ Successfully downloaded composer.phar</fg=green>');
-                return $phpBinary . ' ' . escapeshellarg($composerPharPath);
-            }
-
-            return false;
-        } catch (Exception $e) {
-            return false;
+        } finally {
+            chdir($oldDir);
         }
     }
 
     /**
-     * Display output with reasonable limits
-     *
-     * @param string $output
+     * Try every available shell execution method in order of preference.
+     * Returns output string, or null if nothing is available.
      */
-    protected function displayOutput($output)
+    protected function runCommand(string $command): ?string
     {
-        $lines = explode("\n", trim($output));
+        $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
 
-        // Don't truncate for composer - users need full output
-        foreach ($lines as $line) {
-            $this->line($line);
+        // Strategy 1: popen (streaming, works on most shared hosts)
+        if (!in_array('popen', $disabled) && function_exists('popen')) {
+            $output = '';
+            $handle = popen($command, 'r');
+            if (is_resource($handle)) {
+                while (!feof($handle)) {
+                    $output .= fgets($handle, 4096);
+                }
+                pclose($handle);
+                return $output;
+            }
         }
+
+        // Strategy 2: passthru (output buffering)
+        if (!in_array('passthru', $disabled) && function_exists('passthru')) {
+            ob_start();
+            passthru($command);
+            return ob_get_clean();
+        }
+
+        // Strategy 3: system
+        if (!in_array('system', $disabled) && function_exists('system')) {
+            ob_start();
+            system($command);
+            return ob_get_clean();
+        }
+
+        // Strategy 4: proc_open
+        if (!in_array('proc_open', $disabled) && function_exists('proc_open')) {
+            $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+            $pipes = [];
+            $process = proc_open($command, $descriptors, $pipes);
+            if (is_resource($process)) {
+                $output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($process);
+                return $output;
+            }
+        }
+
+        // Strategy 5: exec
+        if (!in_array('exec', $disabled) && function_exists('exec')) {
+            $outputLines = [];
+            exec($command, $outputLines);
+            return implode("\n", $outputLines);
+        }
+
+        // Strategy 6: shell_exec
+        if (!in_array('shell_exec', $disabled) && function_exists('shell_exec')) {
+            return shell_exec($command) ?? '';
+        }
+
+        return null;
     }
 
     /**
-     * Show help when Composer is not found
+     * Show available commands help.
      */
-    protected function showComposerNotFoundHelp()
+    protected function showHelp(): void
     {
-        $this->line('<fg=red>❌ Composer not found</fg=red>');
+        $this->line('<fg=cyan>Composer Terminal</fg=cyan>');
         $this->line('');
-        $this->line('<fg=yellow>For Shared Hosting:</fg=yellow>');
-        $this->line('1. Download composer.phar from https://getcomposer.org/composer.phar');
-        $this->line('2. Upload to: ' . base_path());
+        $this->line('<fg=green>Usage:</fg=green>  composer --command="<command>"');
         $this->line('');
-        $this->line('<fg=yellow>For Local Development:</fg=yellow>');
-        $this->line('1. Install via Homebrew: brew install composer');
-        $this->line('2. Or download from: https://getcomposer.org/');
+        $this->line('<fg=blue>Examples:</fg=blue>');
+        $this->line('  composer --command="show"');
+        $this->line('  composer --command="outdated"');
+        $this->line('  composer --command="install"');
+        $this->line('  composer --command="update"');
+        $this->line('  composer --command="require vendor/package"');
+        $this->line('  composer --command="dump-autoload"');
         $this->line('');
-        $this->line('<fg=blue>Once available, you can use any Composer command!</fg=blue>');
-    }
-
-    /**
-     * Show available Composer commands
-     */
-    protected function showHelp()
-    {
-        $this->line('<fg=cyan>Full-Featured Composer Terminal</fg=cyan>');
-        $this->line('');
-        $this->line('<fg=green>All Composer commands are available:</fg=green>');
-        $this->line('');
-        $this->line('<fg=blue>Package Management:</fg=blue>');
-        $this->line('  composer install                Install dependencies');
-        $this->line('  composer update                 Update dependencies');
-        $this->line('  composer require vendor/package Add new package');
-        $this->line('  composer remove vendor/package  Remove package');
-        $this->line('  composer show                   List packages');
-        $this->line('  composer outdated               Show outdated packages');
-        $this->line('');
-        $this->line('<fg=blue>Information & Validation:</fg=blue>');
-        $this->line('  composer --version              Show Composer version');
-        $this->line('  composer validate               Validate composer.json');
-        $this->line('  composer check-platform-reqs   Check requirements');
-        $this->line('  composer diagnose               Diagnose issues');
-        $this->line('  composer show vendor/package    Show package details');
-        $this->line('');
-        $this->line('<fg=blue>Maintenance:</fg=blue>');
-        $this->line('  composer dump-autoload          Regenerate autoloader');
-        $this->line('  composer clear-cache            Clear cache');
-        $this->line('  composer self-update            Update Composer');
-        $this->line('');
-        $this->line('<fg=yellow>💪 Full power for shared hosting management!</fg=yellow>');
-        $this->line('<fg=red>⚠️  Use with caution on production sites</fg=red>');
+        $this->line('<fg=yellow>Note:</fg=yellow> Requires composer.phar in project root.');
     }
 }
