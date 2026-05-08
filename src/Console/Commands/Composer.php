@@ -7,24 +7,19 @@ use Recca0120\Terminal\Contracts\TerminalCommand;
 
 class Composer extends Command implements TerminalCommand
 {
-    protected $signature = 'composer {cmd* : Composer command to run (e.g. outdated, show, install)}';
+    // The JavaScript always sends args as --command="..." when commandLine=true.
+    // Keep the {--command=} signature so Artisan correctly parses the option value.
+    protected $signature = 'composer {--command= : Composer command to run (e.g. outdated, show, install)}';
 
     protected $description = 'Run Composer commands via composer.phar';
 
     public function handle(): int
     {
-        $cmdParts = array_values(array_filter($this->argument('cmd')));
+        $command = trim($this->option('command') ?? '');
 
-        if (empty($cmdParts)) {
+        if (empty($command)) {
             $this->showHelp();
             return 0;
-        }
-
-        $safeParts = array_values(array_filter(array_map([$this, 'sanitizePart'], $cmdParts)));
-
-        if (empty($safeParts)) {
-            $this->error('Invalid command characters.');
-            return 1;
         }
 
         $composerPhar = $this->findComposerPhar();
@@ -36,11 +31,20 @@ class Composer extends Command implements TerminalCommand
             return 1;
         }
 
-        $displayCmd = implode(' ', $safeParts);
-        $this->line('<fg=yellow>⏳ Running: composer ' . $displayCmd . '</fg=yellow>');
+        // Split the command into individual parts, sanitize each one.
+        $parts = array_values(array_filter(
+            array_map([$this, 'sanitizePart'], explode(' ', $command))
+        ));
+
+        if (empty($parts)) {
+            $this->error('Invalid command characters.');
+            return 1;
+        }
+
+        $this->line('<fg=yellow>⏳ Running: composer ' . implode(' ', $parts) . '</fg=yellow>');
         $this->line('');
 
-        $output = $this->runViaPhar($safeParts, $composerPhar);
+        $output = $this->runViaPhar($parts, $composerPhar);
 
         if ($output === null) {
             $this->error('Failed to load composer.phar. Make sure it is a valid phar archive.');
@@ -61,9 +65,9 @@ class Composer extends Command implements TerminalCommand
      * Run a composer command by loading composer.phar directly into the PHP
      * process via the phar:// stream wrapper — no shell functions needed.
      *
-     * @param  string[]  $cmdParts  e.g. ['outdated'] or ['update', 'vendor/pkg']
+     * @param  string[]  $parts  e.g. ['outdated'] or ['update', 'vendor/pkg']
      */
-    protected function runViaPhar(array $cmdParts, string $pharPath): ?string
+    protected function runViaPhar(array $parts, string $pharPath): ?string
     {
         $autoload = 'phar://' . $pharPath . '/vendor/autoload.php';
 
@@ -81,7 +85,7 @@ class Composer extends Command implements TerminalCommand
             $app->setAutoExit(false);
 
             // Build argv: ['composer', 'outdated']  or  ['composer', 'update', 'vendor/pkg']
-            $argv = array_merge(['composer'], $cmdParts);
+            $argv = array_merge(['composer'], $parts);
             $input = new \Symfony\Component\Console\Input\ArgvInput($argv);
 
             $output = new \Symfony\Component\Console\Output\BufferedOutput(
@@ -143,11 +147,11 @@ class Composer extends Command implements TerminalCommand
         $this->line('');
         $this->line('Requires <fg=yellow>composer.phar</fg=yellow> in: ' . base_path());
         $this->line('');
-        $this->line('<fg=green>Usage:</fg=green>  composer <command> [arguments]');
+        $this->line('<fg=green>Usage:</fg=green>  composer <command>');
         $this->line('');
         $this->line('<fg=blue>Examples:</fg=blue>');
-        $this->line('  composer show');
         $this->line('  composer outdated');
+        $this->line('  composer show');
         $this->line('  composer install');
         $this->line('  composer update vendor/package');
         $this->line('  composer require vendor/package');
