@@ -135,7 +135,7 @@ class Composer extends Command implements TerminalCommand
         chdir(base_path());
 
         try {
-            $output = $this->runCommand($fullCommand);
+            $output = $this->runShellCommand($fullCommand);
 
             if ($output === null) {
                 $this->error('No shell execution method available on this server.');
@@ -156,7 +156,7 @@ class Composer extends Command implements TerminalCommand
      * Try every available shell execution method in order of preference.
      * Returns output string, or null if nothing is available.
      */
-    protected function runCommand(string $command): ?string
+    protected function runShellCommand(string $command): ?string
     {
         $disabled = array_map('trim', explode(',', ini_get('disable_functions')));
 
