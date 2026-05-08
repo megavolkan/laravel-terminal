@@ -7,22 +7,22 @@ use Recca0120\Terminal\Contracts\TerminalCommand;
 
 class Composer extends Command implements TerminalCommand
 {
-    protected $signature = 'composer {--command= : The composer command to execute}';
+    protected $signature = 'composer {cmd* : Composer command to run (e.g. outdated, show, install)}';
 
     protected $description = 'Run Composer commands via composer.phar';
 
     public function handle(): int
     {
-        $command = trim($this->option('command') ?? '');
+        $cmdParts = array_values(array_filter($this->argument('cmd')));
 
-        if (empty($command)) {
+        if (empty($cmdParts)) {
             $this->showHelp();
             return 0;
         }
 
-        $safeCmd = $this->sanitizeCommand($command);
+        $safeParts = array_values(array_filter(array_map([$this, 'sanitizePart'], $cmdParts)));
 
-        if (empty($safeCmd)) {
+        if (empty($safeParts)) {
             $this->error('Invalid command characters.');
             return 1;
         }
@@ -31,18 +31,19 @@ class Composer extends Command implements TerminalCommand
 
         if ($composerPhar === null) {
             $this->line('<fg=red>❌ composer.phar not found.</fg=red>');
-            $this->line('Upload composer.phar to: <fg=yellow>' . base_path() . '</fg=yellow>');
-            $this->line('Download from: <fg=blue>https://getcomposer.org/composer.phar</fg=blue>');
+            $this->line('Upload to: <fg=yellow>' . base_path() . '</fg=yellow>');
+            $this->line('Download: <fg=blue>https://getcomposer.org/composer.phar</fg=blue>');
             return 1;
         }
 
-        $this->line('<fg=yellow>⏳ Running: composer ' . $safeCmd . '</fg=yellow>');
+        $displayCmd = implode(' ', $safeParts);
+        $this->line('<fg=yellow>⏳ Running: composer ' . $displayCmd . '</fg=yellow>');
         $this->line('');
 
-        $output = $this->runViaPhar($safeCmd, $composerPhar);
+        $output = $this->runViaPhar($safeParts, $composerPhar);
 
         if ($output === null) {
-            $this->error('Failed to run composer. Check that composer.phar is a valid phar archive.');
+            $this->error('Failed to load composer.phar. Make sure it is a valid phar archive.');
             return 1;
         }
 
@@ -59,8 +60,10 @@ class Composer extends Command implements TerminalCommand
     /**
      * Run a composer command by loading composer.phar directly into the PHP
      * process via the phar:// stream wrapper — no shell functions needed.
+     *
+     * @param  string[]  $cmdParts  e.g. ['outdated'] or ['update', 'vendor/pkg']
      */
-    protected function runViaPhar(string $command, string $pharPath): ?string
+    protected function runViaPhar(array $cmdParts, string $pharPath): ?string
     {
         $autoload = 'phar://' . $pharPath . '/vendor/autoload.php';
 
@@ -73,29 +76,23 @@ class Composer extends Command implements TerminalCommand
             // PHP's phar:// stream wrapper is a core feature — no exec needed.
             require_once $autoload;
 
-            // Prevent Composer from calling exit() so the web request continues.
             /** @var \Composer\Console\Application $app */
             $app = new \Composer\Console\Application();
             $app->setAutoExit(false);
 
-            // Build argv for Composer.
-            $parts = array_values(array_filter(explode(' ', $command)));
-            array_unshift($parts, 'composer');
+            // Build argv: ['composer', 'outdated']  or  ['composer', 'update', 'vendor/pkg']
+            $argv = array_merge(['composer'], $cmdParts);
+            $input = new \Symfony\Component\Console\Input\ArgvInput($argv);
 
-            $input = new \Symfony\Component\Console\Input\ArgvInput($parts);
-
-            // Capture all output — no ANSI codes.
             $output = new \Symfony\Component\Console\Output\BufferedOutput(
                 \Symfony\Component\Console\Output\OutputInterface::VERBOSITY_NORMAL,
-                false
+                false // no ANSI
             );
 
-            // Ensure Composer writes to a writable home directory.
             if (!getenv('COMPOSER_HOME')) {
                 putenv('COMPOSER_HOME=' . sys_get_temp_dir() . '/.composer');
             }
 
-            // Set working directory to project root.
             $cwd = getcwd();
             chdir(base_path());
 
@@ -132,12 +129,12 @@ class Composer extends Command implements TerminalCommand
     }
 
     /**
-     * Allow only safe characters in the composer command string.
+     * Allow only safe characters in each command part.
      * escapeshellarg/escapeshellcmd are disabled on shared hosting.
      */
-    protected function sanitizeCommand(string $command): string
+    protected function sanitizePart(string $part): string
     {
-        return trim(preg_replace('/[^a-zA-Z0-9 \-:\/\.\=\^\~\@\_]/', '', $command));
+        return trim(preg_replace('/[^a-zA-Z0-9\-:\/\.\=\^\~\@\_]/', '', $part));
     }
 
     protected function showHelp(): void
@@ -146,12 +143,14 @@ class Composer extends Command implements TerminalCommand
         $this->line('');
         $this->line('Requires <fg=yellow>composer.phar</fg=yellow> in: ' . base_path());
         $this->line('');
-        $this->line('<fg=green>Examples:</fg=green>');
-        $this->line('  composer --command="show"');
-        $this->line('  composer --command="outdated"');
-        $this->line('  composer --command="install"');
-        $this->line('  composer --command="update vendor/package"');
-        $this->line('  composer --command="require vendor/package"');
-        $this->line('  composer --command="dump-autoload"');
+        $this->line('<fg=green>Usage:</fg=green>  composer <command> [arguments]');
+        $this->line('');
+        $this->line('<fg=blue>Examples:</fg=blue>');
+        $this->line('  composer show');
+        $this->line('  composer outdated');
+        $this->line('  composer install');
+        $this->line('  composer update vendor/package');
+        $this->line('  composer require vendor/package');
+        $this->line('  composer dump-autoload');
     }
 }
