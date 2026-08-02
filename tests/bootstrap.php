@@ -78,6 +78,13 @@ if (function_exists('storage_path') === false) {
     }
 }
 
+if (function_exists('now') === false) {
+    function now($tz = null)
+    {
+        return Carbon::now($tz);
+    }
+}
+
 if (class_exists('Route') === false) {
     class bootstrap
     {

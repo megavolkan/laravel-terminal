@@ -48,7 +48,8 @@ class FindTest extends TestCase
         $commandTester = new CommandTester($this->giveCommand());
         $commandTester->execute(['path' => '/', '-name' => 'foo1', '-maxdepth' => '0']);
 
-        self::assertStringContainsString('vfs://root//', $commandTester->getDisplay());
+        // Yol artık normalleştiriliyor: 'vfs://root//' yerine 'vfs://root'
+        self::assertStringContainsString('vfs://root', $commandTester->getDisplay());
     }
 
     public function test_max_depth_bigger_then_zero()

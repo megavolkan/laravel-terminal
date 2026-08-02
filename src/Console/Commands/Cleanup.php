@@ -5,6 +5,7 @@ namespace Recca0120\Terminal\Console\Commands;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
+use Symfony\Component\Console\Input\InputOption;
 use Webmozart\Glob\Glob;
 
 class Cleanup extends Command
@@ -47,6 +48,12 @@ class Cleanup extends Command
      */
     public function handle()
     {
+        if ((bool) $this->option('force') === false) {
+            $this->warnBeforeDelete();
+
+            return 1;
+        }
+
         set_time_limit(0);
         $root = function_exists('base_path') === true ? base_path() : getcwd();
         $root = rtrim($root, '/').'/';
@@ -98,5 +105,38 @@ class Cleanup extends Command
             });
 
         $this->line('');
+
+        return 0;
+    }
+
+    /**
+     * Web terminal etkileşimli soru soramaz (input her zaman non-interactive
+     * çalışır); bu yüzden onay, açık bir --force bayrağıyla alınır.
+     */
+    protected function warnBeforeDelete(): void
+    {
+        $this->line('<fg=red>DİKKAT: cleanup geri alınamaz dosya silme işlemi yapar.</fg=red>');
+        $this->line('');
+        $this->line('Silinecekler:');
+        $this->line('  - vendor/*/* içindeki test, doküman ve VCS klasörleri');
+        $this->line('  - <fg=yellow>vendor/phpunit</fg=yellow>');
+        $this->line('  - proje kökündeki <fg=yellow>node_modules</fg=yellow>, <fg=yellow>.git</fg=yellow>, <fg=yellow>.svn</fg=yellow>');
+        $this->line('');
+        $this->line('SSH erişimi olmayan bir sunucuda silinen dosyaları geri getirmek için');
+        $this->line('vendor klasörünü yeniden yüklemeniz gerekebilir.');
+        $this->line('');
+        $this->line('Devam etmek için: <fg=yellow>cleanup --force</fg=yellow>');
+    }
+
+    /**
+     * Get the console command options.
+     *
+     * @return array
+     */
+    protected function getOptions()
+    {
+        return [
+            ['force', null, InputOption::VALUE_NONE, 'Onay istemeden sil'],
+        ];
     }
 }

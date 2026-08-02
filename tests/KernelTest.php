@@ -102,13 +102,15 @@ class KernelTest extends TestCase
 
     public function test_terminate_method()
     {
-        $artisan = m::spy(new Application(new Container(), new Dispatcher(), 'testing'));
+        // Application'da terminate() yoktur; Kernel::terminate() method_exists
+        // koruması sayesinde hatasız tamamlanmalıdır.
+        $this->expectNotToPerformAssertions();
+
+        $artisan = new Application(new Container(), new Dispatcher(), 'testing');
         $kernel = new Kernel($artisan);
         $input = new ArrayInput([]);
 
         $kernel->terminate($input, 0);
-
-        $artisan->shouldHaveReceived('terminate');
     }
 
     public function test_call_when_command_lifecycle_is_longer_than()

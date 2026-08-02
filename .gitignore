@@ -10,3 +10,4 @@ composer.lock
 .mix-manifest.json
 Thumbs.db
 .idea
+.phpunit.cache/

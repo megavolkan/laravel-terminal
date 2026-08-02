@@ -120,6 +120,27 @@ class CleanupTest extends TestCase
         ],
     ];
 
+    public function test_cleanup_requires_force_flag()
+    {
+        $root = vfsStream::setup('root', null, $this->structure);
+        $container = m::mock(new Container);
+        $container->shouldReceive('basePath')->andReturn($root->url());
+        $container->shouldReceive('runningUnitTests')->andReturn(false);
+        Container::setInstance($container);
+
+        $files = m::spy(Filesystem::class);
+        $command = new Cleanup($files);
+        $command->setLaravel($container);
+
+        $commandTester = new CommandTester($command);
+        $exitCode = $commandTester->execute([]);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('cleanup --force', $commandTester->getDisplay());
+        $files->shouldNotHaveReceived('deleteDirectory');
+        $files->shouldNotHaveReceived('delete');
+    }
+
     public function test_cleanup_file()
     {
         $root = vfsStream::setup('root', null, $this->structure);
@@ -132,7 +153,7 @@ class CleanupTest extends TestCase
         $command->setLaravel($container);
 
         $commandTester = new CommandTester($command);
-        $commandTester->execute([]);
+        $commandTester->execute(['--force' => true]);
 
         self::assertSame([
             'root' => [

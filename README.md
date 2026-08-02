@@ -1,15 +1,32 @@
 # Laravel Terminal - Enhanced Version
 
-Laravel 11/12 compatible web terminal with full Composer support and Filament authentication.
+Laravel 11/12/13 compatible web terminal with full Composer support, designed for
+shared hosting where shell functions are disabled.
+
+Requires PHP 8.2, 8.3 or 8.4.
 
 ## Features
 
-- ✅ Laravel 11/12 compatibility
-- ✅ Full Composer support (all commands)
+- ✅ Laravel 11/12/13 compatibility
+- ✅ Full Composer support, running in-process — no shell functions required
 - ✅ Smart Tinker with auto-fixes for quotes and namespaces
-- ✅ Filament authentication integration
+- ✅ Works behind any authentication middleware (a Filament panel guard is shown below)
 - ✅ Shared hosting compatible
 - ✅ No SSH required
+
+## ⚠️ Upgrading — breaking changes
+
+This version is **secure by default**. After upgrading you must take two steps or the terminal will be unreachable:
+
+1. **Enable it explicitly.** The `enabled` flag no longer follows `APP_DEBUG`. Add to your `.env`:
+
+   ```
+   TERMINAL_ENABLED=true
+   ```
+
+2. **Check the IP whitelist.** The whitelist in `config/terminal.php` never actually ran in earlier versions — it does now. If your published config still lists `127.0.0.1` and friends, you will be locked out from your real IP. Either add your own IP or set `'whitelists' => []` to disable the IP check and rely on authentication middleware instead.
+
+`composer.phar` is no longer needed and can be deleted from your project root.
 
 ## Installation
 
@@ -26,7 +43,11 @@ composer require recca0120/terminal:dev-master
 php artisan vendor:publish --provider="Recca0120\Terminal\TerminalServiceProvider"
 ```
 
-### 3. Create Filament Auth Middleware
+### 3. Create an Auth Middleware
+
+The package ships no authentication of its own — you supply the guard. The
+example below sends unauthenticated visitors to a Filament panel's login page;
+adapt the redirect (or swap in Laravel's own `auth` middleware) to match your app.
 
 ```bash
 php artisan make:middleware FilamentTerminalAuth
@@ -82,6 +103,10 @@ In `bootstrap/app.php`, add:
 In `config/terminal.php`, set:
 
 ```php
+'enabled' => env('TERMINAL_ENABLED', false),
+
+'whitelists' => [],   // empty = no IP check; rely on the middleware below
+
 'route' => [
     'prefix' => 'terminal',
     'as' => 'terminal.',
@@ -89,38 +114,64 @@ In `config/terminal.php`, set:
 ],
 ```
 
+And enable it in `.env`:
+
+```
+TERMINAL_ENABLED=true
+```
+
 ### 6. For Shared Hosting
 
-Upload `composer.phar` to your project root:
-
-```bash
-curl -o composer.phar https://getcomposer.org/composer.phar
-```
+Nothing extra to install. Composer runs inside the same PHP process via the
+`composer/composer` library, so `exec`, `proc_open` and friends can stay
+disabled. `composer.phar` is **not** used and is not needed.
 
 ## Usage
 
 - Access terminal at: `/terminal`
-- Must be logged into Filament admin panel first
-- All Composer commands available: `composer install`, `composer update`, etc.
+- Must satisfy the auth middleware you registered in step 3 first
+- Composer: `composer install`, `require`, `remove`, `update`, `show`, `outdated`, `dump-autoload`, `clear-cache`
 - Smart Tinker: `tinker User::count()`, `tinker config(app.name)`
 
 ## Security
 
-- Requires Filament authentication
-- Add role/permission checks in middleware as needed
-- Safe for shared hosting environments
+The terminal executes arbitrary PHP, SQL and filesystem operations. Treat the
+URL as equivalent to shell access and layer every control below:
+
+- **Disabled by default** — requires `TERMINAL_ENABLED=true`
+- **IP whitelist** — enforced per request by `AuthorizeTerminal` middleware; a
+  blocked request gets a 404 so the terminal's existence is not disclosed
+- **Authentication middleware** — always add one (see step 3) for production
+- **Path confinement** — `vi`, `tail` and `find` cannot read or write outside
+  the project root
+- **Destructive commands gated** — `cleanup` requires an explicit `--force`
+
+Do not rely on `APP_DEBUG` to gate the terminal; it is unrelated to access
+control and is frequently left enabled by accident on shared hosts.
 
 ## Commands Available
 
 - **Artisan**: All Laravel artisan commands
 - **Tinker**: Interactive PHP with smart auto-corrections
-- **Composer**: Full Composer functionality
+- **Composer**: dependency management in-process; commands needing a shell or a
+  prompt (`exec`, `global`, `run-script`, `self-update`, `create-project`,
+  `browse`, `home`) are blocked
 - **System**: find, tail, cleanup, vi, mysql
 
 ## Troubleshooting
 
-If Composer commands fail, ensure `composer.phar` is in your project root or Composer is installed on the server.
+**Terminal returns 404.** Either `TERMINAL_ENABLED` is not `true`, or your IP is
+not in `config/terminal.php`'s `whitelists`. Set `'whitelists' => []` to turn the
+IP check off.
+
+**`composer update` runs out of memory.** Full dependency resolution can need
+512 MB or more, and many shared hosts forbid raising `memory_limit` at runtime.
+`install`, `require` and `remove` are much lighter; for a large `update`, run it
+locally and upload `composer.lock`, then run `composer install` here.
+
+**A package fails to install.** Only Packagist dist (zip) packages are supported;
+`dev-*` branches sourced from git need a git binary, which shared hosts lack.
 
 ## Credits
 
-Enhanced version of [recca0120/laravel-terminal](https://github.com/recca0120/laravel-terminal) with Laravel 11/12 compatibility and additional features.
+Enhanced version of [recca0120/laravel-terminal](https://github.com/recca0120/laravel-terminal) with Laravel 11/12/13 compatibility and additional features.

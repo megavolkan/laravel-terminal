@@ -27,7 +27,10 @@ class TerminalController extends Controller
      */
     public function index(Kernel $kernel, Request $request, ResponseFactory $responseFactory, $view = 'index')
     {
-        // Laravel 12 compatible session token retrieval
+        // Laravel 12 compatible session token retrieval.
+        // Rastgele bir token üretmek CSRF doğrulamasını geçemeyeceği için
+        // kullanıcıyı anlaşılmaz bir 419 hatasına düşürüyordu; token
+        // alınamıyorsa boş bırakılır ve arayüz bunu bildirir.
         $token = '';
         try {
             if ($request->hasSession() && $request->session()) {
@@ -36,8 +39,7 @@ class TerminalController extends Controller
                 $token = csrf_token();
             }
         } catch (Exception $e) {
-            // Fallback: generate a token manually
-            $token = Str::random(40);
+            $token = '';
         }
 
         try {
@@ -73,14 +75,12 @@ class TerminalController extends Controller
             $method = $request->get('method', '');
             $params = $request->get('params', []);
 
-            // Validate the method to prevent arbitrary command execution
             if (empty($method) || !is_string($method)) {
                 throw new Exception('Invalid method');
             }
 
-            // Additional security: validate method against allowed patterns
-            if (!$this->isValidCommand($method)) {
-                throw new Exception('Command not allowed');
+            if (!is_array($params)) {
+                throw new Exception('Invalid params');
             }
 
             $code = $kernel->call($method, $params);
@@ -100,7 +100,7 @@ class TerminalController extends Controller
                         'data' => $kernel->output()
                     ]
                 ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $attributes = [
                 'jsonrpc' => $request->get('jsonrpc'),
                 'id' => null,
@@ -140,7 +140,9 @@ class TerminalController extends Controller
             return $responseFactory->make('File not found', 404);
         }
 
-        $mimeType = strpos($filename, '.css') !== false ? 'text/css' : 'application/javascript';
+        $mimeType = strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'css'
+            ? 'text/css'
+            : 'application/javascript';
         $lastModified = $files->lastModified($filename);
         $eTag = sha1_file($filename);
 
@@ -167,52 +169,4 @@ class TerminalController extends Controller
         return $response->setEtag($eTag);
     }
 
-    /**
-     * Validate if the command is allowed
-     *
-     * @param string $command
-     * @return bool
-     */
-    private function isValidCommand($command)
-    {
-        // Allow common Laravel artisan commands
-        $allowedPatterns = [
-            '/^list/',
-            '/^help/',
-            '/^route:list/',
-            '/^cache:clear/',
-            '/^config:clear/',
-            '/^view:clear/',
-            '/^migrate:status/',
-            '/^queue:work/',
-            '/^queue:restart/',
-            '/^storage:link/',
-            '/^optimize/',
-            '/^make:/',  // Allow all make commands
-            // Add more patterns as needed
-        ];
-
-        foreach ($allowedPatterns as $pattern) {
-            if (preg_match($pattern, $command)) {
-                return true;
-            }
-        }
-
-        // Block dangerous commands
-        $blockedPatterns = [
-            '/^migrate/',  // Block migrations (potentially dangerous)
-            '/^db:seed/',  // Block seeding
-            '/^key:generate/', // Block key generation
-            '/^down/',     // Block maintenance mode
-            '/^up/',       // Block maintenance mode
-        ];
-
-        foreach ($blockedPatterns as $pattern) {
-            if (preg_match($pattern, $command)) {
-                return false;
-            }
-        }
-
-        return true; // Allow other commands
-    }
 }

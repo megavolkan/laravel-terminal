@@ -64,7 +64,7 @@ class TerminalControllerTest extends TestCase
         $request = m::mock(Request::class);
         $responseFactory = m::mock(ResponseFactory::class);
 
-        $request->shouldReceive('get')->once()->with('method')->andReturn($command = 'foo');
+        $request->shouldReceive('get')->once()->with('method', '')->andReturn($command = 'foo');
         $request->shouldReceive('get')->once()->with('params', [])->andReturn($parameters = ['foo' => 'bar']);
 
         $kernel = m::mock(Kernel::class);
@@ -89,7 +89,7 @@ class TerminalControllerTest extends TestCase
         $request = m::mock(Request::class);
         $responseFactory = m::mock(ResponseFactory::class);
 
-        $request->shouldReceive('get')->once()->with('method')->andReturn($command = 'foo');
+        $request->shouldReceive('get')->once()->with('method', '')->andReturn($command = 'foo');
         $request->shouldReceive('get')->once()->with('params', [])->andReturn($parameters = ['foo' => 'bar']);
 
         $kernel = m::mock(Kernel::class);

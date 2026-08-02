@@ -2,21 +2,14 @@
 
 namespace Recca0120\Terminal;
 
-use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Arr;
 use Illuminate\Support\ServiceProvider;
+use Recca0120\Terminal\Http\Middleware\AuthorizeTerminal;
 use Exception;
 
 class TerminalServiceProvider extends ServiceProvider
 {
-    /**
-     * namespace.
-     *
-     * @var string
-     */
-    protected $namespace = 'Recca0120\Terminal\Http\Controllers';
-
     /**
      * Bootstrap any application services.
      */
@@ -25,15 +18,10 @@ class TerminalServiceProvider extends ServiceProvider
         try {
             $config = $this->app['config']['terminal'] ?? [];
 
-            // Get request safely
-            $request = null;
-            if ($this->app->bound('request')) {
-                $request = $this->app['request'];
-            } else {
-                $request = Request::capture();
-            }
-
-            if ($this->allowWhiteList($request, $config)) {
+            // Route'lar yalnızca terminal etkinken kaydedilir. İsteğe özel
+            // kontroller (IP beyaz listesi) AuthorizeTerminal middleware'inde
+            // yapılır; böylece route:cache sonrası da doğru çalışır.
+            if ($this->enabled($config)) {
                 $this->loadViewsFrom(__DIR__ . '/../resources/views', 'terminal');
                 $this->handleRoutes($this->app['router'], $config);
             }
@@ -41,10 +29,15 @@ class TerminalServiceProvider extends ServiceProvider
             if ($this->app->runningInConsole() === true) {
                 $this->handlePublishes();
             }
-        } catch (Exception $e) {
-            // Log error for debugging but don't break the app
+        } catch (\Throwable $e) {
             if (function_exists('logger')) {
                 logger()->error('Terminal Service Provider Boot Error: ' . $e->getMessage());
+            }
+
+            // Hatayı sessizce yutmak teşhisi imkânsızlaştırıyordu; geliştirme
+            // ortamında görünür olsun.
+            if (method_exists($this->app, 'hasDebugModeEnabled') && $this->app->hasDebugModeEnabled()) {
+                throw $e;
             }
         }
     }
@@ -95,9 +88,13 @@ class TerminalServiceProvider extends ServiceProvider
     {
         // Laravel 12 compatible route caching check
         if (!$this->routesCached()) {
-            $routeConfig = array_merge([
-                'namespace' => $this->namespace,
-            ], Arr::get($config, 'route', []));
+            $routeConfig = Arr::get($config, 'route', []);
+
+            // Erişim doğrulaması kullanıcı middleware'lerinden önce çalışsın
+            $routeConfig['middleware'] = array_merge(
+                [AuthorizeTerminal::class],
+                (array) Arr::get($routeConfig, 'middleware', [])
+            );
 
             $router->group($routeConfig, function () {
                 require __DIR__ . '/../routes/web.php';
@@ -145,30 +142,17 @@ class TerminalServiceProvider extends ServiceProvider
     }
 
     /**
-     * Check if terminal access is allowed
+     * Terminal etkin mi?
      *
-     * @param  \Illuminate\Http\Request  $request
+     * Önceden bu kontrol 'enabled' değerini === ile karşılaştırdığı ve
+     * config her zaman bool döndürdüğü için IP beyaz listesi dalı hiç
+     * çalışmıyordu. IP kontrolü artık AuthorizeTerminal middleware'inde.
+     *
      * @param  array  $config
      * @return bool
      */
-    private function allowWhiteList(Request $request, $config)
+    private function enabled($config)
     {
-        $enabled = Arr::get($config, 'enabled', false);
-        
-        // If explicitly disabled, deny access
-        if ($enabled === false) {
-            return false;
-        }
-        
-        // If enabled is true, allow access
-        if ($enabled === true) {
-            return true;
-        }
-        
-        // If enabled is not explicitly set, check IP whitelist
-        $whitelists = Arr::get($config, 'whitelists', []);
-        $clientIp = $request->getClientIp();
-        
-        return in_array($clientIp, $whitelists, true);
+        return filter_var(Arr::get($config, 'enabled', false), FILTER_VALIDATE_BOOLEAN);
     }
 }

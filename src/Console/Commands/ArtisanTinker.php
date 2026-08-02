@@ -350,6 +350,8 @@ class ArtisanTinker extends Command implements TerminalCommand
      */
     protected function executeCode($code)
     {
+        $obLevel = ob_get_level();
+
         try {
             // Clean the code input
             $code = trim($code);
@@ -399,8 +401,9 @@ class ArtisanTinker extends Command implements TerminalCommand
 
             return $result;
         } catch (Throwable $e) {
-            // Clean up output buffer
-            if (ob_get_level() > 0) {
+            // Yalnızca bu metodun açtığı buffer'ları kapat; dıştaki
+            // (Laravel/PHPUnit) buffer'lara dokunma
+            while (ob_get_level() > $obLevel) {
                 ob_end_clean();
             }
 

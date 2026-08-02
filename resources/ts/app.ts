@@ -21,6 +21,7 @@ export class Terminal {
     private spinner = new Spinner();
     private commands: Command[] = [];
     private term: any;
+    private activeInterpreterPrompt: string | null = null;
 
     constructor(elementId: string, private options: any) {
         this.element = <HTMLElement>document.querySelector(elementId);
@@ -59,15 +60,19 @@ export class Terminal {
             (command: Command): boolean => {
                 if (command.is(cmd) === true) {
                     if (command.interpreterable(cmd) === true) {
+                        const interpreter = command.getInterpreter();
+                        this.activeInterpreterPrompt = interpreter.prompt;
+
                         this.term.push((cmd: string, term: any) => {
                             if (['exit', 'quit'].indexOf(cmd) !== -1) {
+                                this.activeInterpreterPrompt = null;
                                 term.pop();
 
                                 return;
                             }
 
                             this.run(`${term.name()} ${cmd}`);
-                        }, command.getInterpreter());
+                        }, interpreter);
 
                         return true;
                     }
@@ -102,7 +107,7 @@ export class Terminal {
         this.term.pause(true);
 
         this.spinner.start((frame: string) => {
-            this.term.set_prompt(`${this.prompt()}${frame}`);
+            this.term.set_prompt(`${this.contextPrompt()}${frame}`);
         });
 
         command
@@ -111,7 +116,7 @@ export class Terminal {
                 this.spinner.stop();
                 this.term.resume();
                 this.term.focus();
-                this.term.set_prompt(this.prompt());
+                this.term.set_prompt(this.contextPrompt());
                 if (this.outputFormatter.is(error)) {
                     this.term.echo(error);
                 } else {
@@ -126,10 +131,18 @@ export class Terminal {
                 this.spinner.stop();
                 this.term.resume();
                 this.term.focus();
-                this.term.set_prompt(this.prompt());
+                this.term.set_prompt(this.contextPrompt());
                 this.term.echo(result);
                 this.term.scroll_to_bottom();
             });
+    }
+
+    private contextPrompt(): string {
+        if (this.activeInterpreterPrompt !== null) {
+            return this.activeInterpreterPrompt;
+        }
+
+        return this.prompt();
     }
 
     private async confirm(message: string, title: string = '', cancel: string = ''): Promise<any> {

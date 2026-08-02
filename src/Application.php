@@ -27,26 +27,27 @@ class Application extends ConsoleApplication
     {
         if ($this->ajax() === true) {
             $this->lastOutput = $outputBuffer ?: new BufferedOutput(BufferedOutput::VERBOSITY_NORMAL, true, new OutputFormatter(true));
-            $this->setCatchExceptions(true);
+            $this->setCatchThrowablesOrExceptions(true);
         } else {
             $this->lastOutput = $outputBuffer ?: new BufferedOutput();
-            $this->setCatchExceptions(false);
+            $this->setCatchThrowablesOrExceptions(false);
         }
 
-        // Build command string more safely
+        // Build command string — StringInput handles its own parsing so we
+        // must NOT use escapeshellarg() here (it also may be disabled on
+        // shared hosting). Wrap values containing spaces in double quotes.
         $commandString = $command;
         if (!empty($parameters)) {
-            // Special handling for tinker command - DON'T add --command= prefix
             if ($command === 'tinker' && count($parameters) > 0) {
-                // For tinker, pass the code directly as --command option value
                 $tinkCommand = $parameters[0];
-                $commandString = 'tinker --command=' . escapeshellarg($tinkCommand);
+                $quoted = '"' . str_replace('"', '\\"', $tinkCommand) . '"';
+                $commandString = 'tinker --command=' . $quoted;
             } else {
-                // For other commands, add parameters normally
                 foreach ($parameters as $parameter) {
                     if (is_string($parameter)) {
-                        // Escape parameters that contain spaces
-                        $parameter = escapeshellarg($parameter);
+                        $parameter = strpos($parameter, ' ') !== false
+                            ? '"' . str_replace('"', '\\"', $parameter) . '"'
+                            : $parameter;
                         $commandString .= ' ' . $parameter;
                     }
                 }
@@ -57,17 +58,30 @@ class Application extends ConsoleApplication
             $input = new StringInput($commandString);
             $input->setInteractive(false);
             $result = $this->run($input, $this->lastOutput);
-        } catch (Exception $e) {
-            // Handle exceptions more gracefully
+        } catch (\Throwable $e) {
+            // Handle exceptions and fatal errors gracefully
             if ($this->lastOutput instanceof BufferedOutput) {
                 $this->lastOutput->write('Error: ' . $e->getMessage());
             }
             $result = 1;
         } finally {
-            $this->setCatchExceptions(true);
+            $this->setCatchThrowablesOrExceptions(true);
         }
 
         return $result;
+    }
+
+    /**
+     * Add an array of commands to the console.
+     * Overrides parent to handle string class names, which Laravel 12+ no longer resolves automatically.
+     *
+     * @param  array  $commands
+     * @return void
+     */
+    #[\Override]
+    public function addCommands(array $commands): void
+    {
+        $this->resolveCommands($commands);
     }
 
     /**
@@ -78,11 +92,18 @@ class Application extends ConsoleApplication
      */
     public function resolveCommands($commands)
     {
-        $validCommands = array_filter($commands, static function ($command) {
-            return is_subclass_of($command, TerminalCommand::class);
-        });
+        $commands = is_array($commands) ? $commands : func_get_args();
 
-        return parent::resolveCommands($validCommands);
+        foreach ($commands as $command) {
+            if (!is_subclass_of($command, TerminalCommand::class)) {
+                continue;
+            }
+
+            $instance = is_string($command) ? $this->laravel->make($command) : $command;
+            $this->add($instance);
+        }
+
+        return $this;
     }
 
     /**
@@ -97,6 +118,18 @@ class Application extends ConsoleApplication
         }
 
         return '';
+    }
+
+    /**
+     * Symfony 7.2+ uses setCatchThrowables(), older versions use setCatchExceptions().
+     */
+    private function setCatchThrowablesOrExceptions(bool $catch): void
+    {
+        if (method_exists($this, 'setCatchThrowables')) {
+            $this->setCatchThrowables($catch);
+        } else {
+            $this->setCatchExceptions($catch);
+        }
     }
 
     /**

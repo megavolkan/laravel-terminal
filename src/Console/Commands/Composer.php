@@ -2,381 +2,499 @@
 
 namespace Recca0120\Terminal\Console\Commands;
 
-use Exception;
+use Composer\Console\Application as ComposerApplication;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Recca0120\Terminal\Contracts\TerminalCommand;
+use Symfony\Component\Console\Formatter\OutputFormatter;
+use Symfony\Component\Console\Input\StringInput;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
 
 class Composer extends Command implements TerminalCommand
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
-    protected $signature = 'composer {--command= : The composer command to execute}';
+    // The terminal JS always sends args as --command="..." when commandLine=true.
+    protected $signature = 'composer {--command= : Çalıştırılacak composer komutu}';
+
+    protected $description = 'Composer komutlarını çalıştırır (shell gerektirmez)';
 
     /**
-     * The console command description.
-     *
-     * @var string
+     * Shell erişimi veya etkileşim gerektirdiği için web terminalde
+     * çalıştırılmasına izin verilmeyen komutlar.
      */
-    protected $description = 'Run Composer commands - Full Access';
+    protected const BLOCKED_COMMANDS = [
+        'browse', 'create-project', 'exec', 'global', 'home',
+        'run', 'run-script', 'self-update', 'selfupdate',
+    ];
 
     /**
-     * Execute the console command.
-     *
-     * @return mixed
+     * vendor klasörünü / autoload dosyalarını değiştiren komutlar.
+     * Bunlar --no-scripts ile çalışır ve ardından package:discover
+     * aynı süreç içinde tetiklenir.
      */
-    public function handle()
+    protected const VENDOR_COMMANDS = [
+        'install', 'update', 'upgrade', 'require', 'remove',
+        'dump-autoload', 'dumpautoload',
+    ];
+
+    public function handle(): int
     {
-        $command = trim($this->option('command') ?? '');
+        $commandLine = $this->normalizeCommandLine($this->option('command'));
 
-        // If no command provided, show help
-        if (empty($command)) {
+        if ($commandLine === '') {
             $this->showHelp();
+
             return 0;
         }
 
-        // Execute any composer command
-        try {
-            $this->executeComposerCommand($command);
-        } catch (Exception $e) {
-            $this->error('Composer Error: ' . $e->getMessage());
+        $parts = array_values(array_filter(explode(' ', $commandLine)));
+        $name = $parts[0] ?? '';
+
+        switch ($name) {
+            case 'show':
+            case 'info':
+                return $this->cmdShow($parts);
+
+            case 'outdated':
+                return $this->cmdOutdated($parts);
+        }
+
+        if (in_array($name, self::BLOCKED_COMMANDS, true)) {
+            $this->error('"composer ' . $name . '" web terminalde desteklenmiyor (shell erişimi veya etkileşim gerektirir).');
+
             return 1;
         }
+
+        return $this->runEmbeddedComposer($name, $commandLine);
+    }
+
+    /**
+     * Web terminalinden gelen komut satırını temizler.
+     *
+     * JS tarafı argümanı her zaman --command="..." biçiminde, tırnaklar dahil
+     * gönderir (resources/ts/command.ts). Değer boşluk içeriyorsa
+     * Application::call() bir kez daha tırnaklar; sonuçta komuta literal
+     * tırnaklarla '"require psr/clock"' ulaşır ve Symfony bunun tamamını
+     * komut adı sanar. ArtisanTinker de aynı temizliği yapar.
+     */
+    protected function normalizeCommandLine(?string $command): string
+    {
+        $command = trim((string) $command);
+
+        if (str_starts_with($command, '--command=')) {
+            $command = trim(substr($command, strlen('--command=')));
+        }
+
+        if (strlen($command) >= 2) {
+            $first = $command[0];
+            $last = substr($command, -1);
+
+            if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                $command = substr($command, 1, -1);
+            }
+        }
+
+        $command = str_replace(['\\"', "\\'"], ['"', "'"], $command);
+
+        return trim($command);
+    }
+
+    // -------------------------------------------------------------------------
+    // Gömülü Composer (shell fonksiyonları olmadan, aynı PHP süreci içinde)
+    // -------------------------------------------------------------------------
+
+    protected function runEmbeddedComposer(string $name, string $commandLine): int
+    {
+        if (!class_exists(ComposerApplication::class)) {
+            $this->error('composer/composer paketi yüklü değil.');
+            $this->line('Geliştirme ortamında <fg=yellow>composer require composer/composer</fg=yellow> çalıştırıp');
+            $this->line('vendor klasörünü sunucuya yükledikten sonra bu komut kullanılabilir.');
+
+            return 1;
+        }
+
+        if (in_array($name, ['require', 'remove', 'update', 'upgrade'], true)
+            && !is_writable($this->projectPath('composer.json'))) {
+            $this->error('composer.json yazılabilir değil. Dosya izinlerini kontrol edin.');
+
+            return 1;
+        }
+
+        $this->prepareEnvironment($name);
+
+        $changesVendor = in_array($name, self::VENDOR_COMMANDS, true);
+
+        // post-autoload-dump içindeki "@php artisan package:discover" bir alt
+        // süreç başlatmak ister (proc_open); --no-scripts ile atlanır ve
+        // package:discover aşağıda aynı süreç içinde çalıştırılır.
+        $flags = ' --no-interaction';
+        if ($changesVendor) {
+            $flags .= ' --no-scripts';
+        }
+        if (in_array($name, ['install', 'update', 'upgrade', 'require'], true)) {
+            $flags .= ' --prefer-dist';
+        }
+        if (in_array($name, ['install', 'update', 'upgrade', 'require', 'remove'], true)) {
+            $flags .= ' --no-progress';
+        }
+
+        $output = new BufferedOutput(OutputInterface::VERBOSITY_NORMAL, true, new OutputFormatter(true));
+        $cwd = getcwd();
+        $previousErrorHandler = $this->currentErrorHandler();
+
+        try {
+            chdir($this->projectPath());
+
+            $application = new ComposerApplication();
+            $application->setAutoExit(false);
+            $application->setCatchExceptions(true);
+
+            $exitCode = $application->run(new StringInput($commandLine . $flags), $output);
+        } catch (\Throwable $e) {
+            $this->writeRaw($output->fetch());
+            $this->error('Composer hatası: ' . $e->getMessage());
+
+            return 1;
+        } finally {
+            // Composer doRun() içinde kendi error handler'ını kaydeder;
+            // önceki handler'a (Laravel) geri dön.
+            $this->restoreErrorHandler($previousErrorHandler);
+
+            if ($cwd !== false) {
+                chdir($cwd);
+            }
+        }
+
+        $this->writeRaw($output->fetch());
+
+        if ($exitCode === 0 && $changesVendor) {
+            $this->runPackageDiscover();
+
+            if (function_exists('opcache_reset')) {
+                @opcache_reset();
+            }
+        }
+
+        return $exitCode;
+    }
+
+    protected function prepareEnvironment(string $name): void
+    {
+        @ini_set('memory_limit', '-1');
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+
+        $home = $this->storagePath('app/composer-home');
+        if (!is_dir($home)) {
+            @mkdir($home, 0755, true);
+        }
+
+        putenv('COMPOSER_HOME=' . $home);
+        putenv('COMPOSER_CACHE_DIR=' . $home . DIRECTORY_SEPARATOR . 'cache');
+        putenv('COMPOSER_NO_INTERACTION=1');
+        putenv('COMPOSER_ALLOW_SUPERUSER=1');
+
+        $limit = (string) ini_get('memory_limit');
+        if (in_array($name, ['update', 'upgrade', 'require'], true)
+            && $limit !== '-1'
+            && $this->toBytes($limit) < 512 * 1024 * 1024) {
+            $this->warn('Uyarı: memory_limit ' . $limit . ' — bağımlılık çözümü sırasında bellek yetersiz kalabilir.');
+        }
+    }
+
+    /**
+     * package:discover'ı alt süreç açmadan, mevcut uygulama içinde çalıştırır.
+     */
+    protected function runPackageDiscover(): void
+    {
+        try {
+            $kernel = $this->laravel->make(ConsoleKernel::class);
+            $kernel->call('package:discover');
+            $this->writeRaw($kernel->output());
+        } catch (\Throwable $e) {
+            $this->warn('package:discover çalıştırılamadı: ' . $e->getMessage());
+            $this->line('Gerekirse <fg=yellow>artisan package:discover</fg=yellow> komutunu elle çalıştırın.');
+        }
+    }
+
+    /**
+     * Composer çıktısı zaten ANSI kodları içerir; Symfony formatter'dan
+     * tekrar geçirmeden olduğu gibi yazar.
+     */
+    protected function writeRaw(string $text): void
+    {
+        $text = rtrim($text);
+
+        if ($text !== '') {
+            $this->output->write($text, true, OutputInterface::OUTPUT_RAW);
+        }
+    }
+
+    /**
+     * Aktif error handler'ı, handler yığınını değiştirmeden döndürür.
+     */
+    protected function currentErrorHandler(): mixed
+    {
+        $handler = set_error_handler(static fn () => false);
+        restore_error_handler();
+
+        return $handler;
+    }
+
+    /**
+     * Composer'ın kaydettiği error handler'ları, çalıştırma öncesindeki
+     * handler tekrar aktif olana kadar geri alır.
+     */
+    protected function restoreErrorHandler(mixed $previous): void
+    {
+        for ($i = 0; $i < 10; $i++) {
+            if ($this->currentErrorHandler() === $previous) {
+                return;
+            }
+
+            restore_error_handler();
+        }
+    }
+
+    protected function projectPath(string $path = ''): string
+    {
+        $base = function_exists('base_path') ? base_path() : (string) getcwd();
+
+        return $path === '' ? $base : $base . DIRECTORY_SEPARATOR . $path;
+    }
+
+    protected function storagePath(string $path = ''): string
+    {
+        $base = function_exists('storage_path') ? storage_path() : sys_get_temp_dir();
+
+        return $path === '' ? $base : $base . DIRECTORY_SEPARATOR . $path;
+    }
+
+    /**
+     * "128M" gibi ini değerlerini byte'a çevirir.
+     */
+    protected function toBytes(string $limit): float
+    {
+        $limit = trim($limit);
+
+        if ($limit === '' || $limit === '-1') {
+            return PHP_FLOAT_MAX;
+        }
+
+        $value = (float) $limit;
+
+        return match (strtolower(substr($limit, -1))) {
+            'g' => $value * 1024 ** 3,
+            'm' => $value * 1024 ** 2,
+            'k' => $value * 1024,
+            default => $value,
+        };
+    }
+
+    // -------------------------------------------------------------------------
+    // composer show (natif — installed.json üzerinden, ağ gerektirmez)
+    // -------------------------------------------------------------------------
+
+    protected function cmdShow(array $parts): int
+    {
+        $packages = $this->readInstalledPackages();
+
+        if ($packages === null) {
+            $this->error('vendor/composer/installed.json okunamadı.');
+
+            return 1;
+        }
+
+        // Paket adına göre filtrele: composer show vendor/package
+        // Kullanıcı argümanı tırnaklamış olabilir (show "psr/"); normalizasyon
+        // yalnızca en dıştaki çifti soyduğu için burada da temizlenir.
+        $filter = trim($parts[1] ?? '', '"\'');
+        if ($filter !== '') {
+            $packages = array_filter($packages, fn ($p) => str_contains($p['name'], $filter));
+        }
+
+        if (empty($packages)) {
+            $this->line('Paket bulunamadı.');
+
+            return 0;
+        }
+
+        $this->line(sprintf('<fg=green>%-45s %-15s %s</fg=green>', 'Paket', 'Sürüm', 'Açıklama'));
+        $this->line(str_repeat('-', 90));
+
+        foreach ($packages as $pkg) {
+            $this->line(sprintf(
+                '%-45s <fg=yellow>%-15s</fg=yellow> %s',
+                $pkg['name'],
+                $pkg['version'] ?? '?',
+                substr($pkg['description'] ?? '', 0, 50)
+            ));
+        }
+
+        $this->line('');
+        $this->line('<fg=green>' . count($packages) . ' paket</fg=green>');
 
         return 0;
     }
 
+    // -------------------------------------------------------------------------
+    // composer outdated (natif — Packagist API üzerinden)
+    // -------------------------------------------------------------------------
+
+    protected function cmdOutdated(array $parts): int
+    {
+        $packages = $this->readInstalledPackages();
+
+        if ($packages === null) {
+            $this->error('vendor/composer/installed.json okunamadı.');
+
+            return 1;
+        }
+
+        $this->line('<fg=yellow>Packagist üzerinden güncel sürümler denetleniyor...</fg=yellow>');
+        $this->line('');
+
+        $outdated = [];
+
+        foreach ($packages as $pkg) {
+            $name    = $pkg['name'] ?? null;
+            $current = $pkg['version'] ?? null;
+
+            if (!$name || !$current || str_starts_with($current, 'dev-')) {
+                continue;
+            }
+
+            $latest = $this->fetchLatestVersion($name);
+
+            if ($latest && $latest !== $current && version_compare(
+                ltrim($latest, 'v'),
+                ltrim($current, 'v'),
+                '>'
+            )) {
+                $outdated[] = [
+                    'name'    => $name,
+                    'current' => $current,
+                    'latest'  => $latest,
+                ];
+            }
+        }
+
+        if (empty($outdated)) {
+            $this->line('<fg=green>Tüm paketler güncel.</fg=green>');
+
+            return 0;
+        }
+
+        $this->line(sprintf('<fg=green>%-45s %-15s %s</fg=green>', 'Paket', 'Mevcut', 'Güncel'));
+        $this->line(str_repeat('-', 80));
+
+        foreach ($outdated as $pkg) {
+            $this->line(sprintf(
+                '%-45s <fg=yellow>%-15s</fg=yellow> <fg=green>%s</fg=green>',
+                $pkg['name'],
+                $pkg['current'],
+                $pkg['latest']
+            ));
+        }
+
+        $this->line('');
+        $this->line('<fg=yellow>' . count($outdated) . ' paket güncel değil</fg=yellow>');
+
+        return 0;
+    }
+
+    // -------------------------------------------------------------------------
+    // Yardımcılar
+    // -------------------------------------------------------------------------
+
     /**
-     * Execute Composer command with full access
+     * vendor/composer/installed.json içindeki kurulu paketleri okur.
      *
-     * @param string $command
-     * @throws Exception
+     * @return array<int, array<string, mixed>>|null
      */
-    protected function executeComposerCommand($command)
+    protected function readInstalledPackages(): ?array
     {
-        // Find composer executable
-        $composerPath = $this->findComposerOnSharedHost();
+        $file = $this->projectPath('vendor/composer/installed.json');
 
-        if (!$composerPath) {
-            $this->showComposerNotFoundHelp();
-            return;
+        if (!file_exists($file)) {
+            return null;
         }
 
-        // Set working directory to Laravel root
-        $workingDir = base_path();
+        $data = json_decode(file_get_contents($file), true);
 
-        // Build the command - properly escaped for paths with spaces
-        // Note: $composerPath is already escaped in findComposerOnSharedHost()
-        $fullCommand = $composerPath . ' ' . escapeshellcmd($command) . ' --no-ansi 2>&1';
-
-        $this->line('<fg=blue>Using:</fg=blue> ' . str_replace(['"', "'"], '', $composerPath));
-        $this->line('<fg=blue>Executing:</fg=blue> ' . $command);
-        $this->line('<fg=yellow>Working Directory:</fg=yellow> ' . $workingDir);
-        $this->line('');
-
-        // Execute with output streaming
-        $output = '';
-        $returnCode = 0;
-
-        // Change to project directory
-        $oldDir = getcwd();
-        chdir($workingDir);
-
-        try {
-            // For long-running commands, we need to stream output
-            if ($this->isLongRunningCommand($command)) {
-                $this->line('<fg=yellow>⏳ This may take a while...</fg=yellow>');
-                $this->streamCommandOutput($fullCommand);
-            } else {
-                // Quick commands can use exec
-                exec($fullCommand, $outputArray, $returnCode);
-                $output = implode("\n", $outputArray);
-
-                if (!empty($output)) {
-                    $this->displayOutput($output);
-                } else {
-                    $this->line('<fg=yellow>Command executed but produced no output.</fg=yellow>');
-                }
-            }
-        } catch (Exception $e) {
-            throw new Exception('Failed to execute composer: ' . $e->getMessage());
-        } finally {
-            // Restore original directory
-            chdir($oldDir);
+        if (!is_array($data)) {
+            return null;
         }
 
-        if ($returnCode !== 0 && !$this->isLongRunningCommand($command)) {
-            $this->error("Command exited with code: $returnCode");
-        } else {
-            $this->line('<fg=green>✅ Command completed</fg=green>');
-        }
+        // Composer 2 paketleri 'packages' anahtarı altında tutar
+        $packages = $data['packages'] ?? $data;
+
+        usort($packages, fn ($a, $b) => strcmp($a['name'] ?? '', $b['name'] ?? ''));
+
+        return $packages;
     }
 
     /**
-     * Stream output for long-running commands
-     *
-     * @param string $command
+     * Packagist'ten paketin en son kararlı sürümünü sorgular.
+     * file_get_contents ile HTTP kullanır (shell fonksiyonu gerekmez).
      */
-    protected function streamCommandOutput($command)
+    protected function fetchLatestVersion(string $package): ?string
     {
-        $descriptorspec = [
-            0 => ['pipe', 'r'],  // stdin
-            1 => ['pipe', 'w'],  // stdout
-            2 => ['pipe', 'w']   // stderr
-        ];
+        // Packagist v2 metadata endpoint'i
+        $url = 'https://repo.packagist.org/p2/' . $package . '.json';
 
-        $process = proc_open($command, $descriptorspec, $pipes);
+        $context = stream_context_create([
+            'http' => [
+                'timeout'        => 5,
+                'ignore_errors'  => true,
+                'user_agent'     => 'Laravel-Terminal/1.0',
+            ],
+        ]);
 
-        if (is_resource($process)) {
-            fclose($pipes[0]); // Close stdin
+        $body = @file_get_contents($url, false, $context);
 
-            // Read output in real-time
-            while (($line = fgets($pipes[1])) !== false) {
-                $this->line(rtrim($line));
-            }
-
-            // Read any errors
-            while (($line = fgets($pipes[2])) !== false) {
-                $this->line('<fg=red>' . rtrim($line) . '</fg=red>');
-            }
-
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
+        if (!$body) {
+            return null;
         }
+
+        $data = json_decode($body, true);
+
+        if (!isset($data['packages'][$package])) {
+            return null;
+        }
+
+        // v2 endpoint'i sürümleri azalan sırada döner; ilk kararlı sürümü al
+        foreach ($data['packages'][$package] as $release) {
+            $version = $release['version'] ?? null;
+            if ($version && !str_contains($version, 'dev') && !str_contains($version, 'alpha') && !str_contains($version, 'beta') && !str_contains($version, 'RC')) {
+                return $version;
+            }
+        }
+
+        return null;
     }
 
-    /**
-     * Check if command is long-running
-     *
-     * @param string $command
-     * @return bool
-     */
-    protected function isLongRunningCommand($command)
+    protected function showHelp(): void
     {
-        $longRunningCommands = [
-            'install',
-            'update',
-            'require',
-            'remove',
-            'create-project',
-            'dump-autoload',
-            'self-update',
-            'global require',
-            'global update'
-        ];
-
-        foreach ($longRunningCommands as $longCommand) {
-            if (strpos($command, $longCommand) !== false) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Find Composer on shared hosting or local development
-     *
-     * @return string|false
-     */
-    protected function findComposerOnSharedHost()
-    {
-        // Strategy 1: Check if there's a local composer.phar in the project
-        $localComposer = base_path('composer.phar');
-        if (file_exists($localComposer)) {
-            // Find the correct CLI PHP binary (not FPM)
-            $phpBinary = $this->findCliPhpBinary();
-            return escapeshellarg($phpBinary) . ' ' . escapeshellarg($localComposer);
-        }
-
-        // Strategy 2: Try to use 'which' if available
-        $whichResult = @shell_exec('which composer 2>/dev/null');
-        if (!empty($whichResult)) {
-            $composerPath = trim($whichResult);
-            if (is_executable($composerPath)) {
-                return escapeshellarg($composerPath);
-            }
-        }
-
-        // Strategy 3: Check if composer is in PATH by trying to run it
-        $testOutput = @shell_exec('composer --version 2>/dev/null');
-        if (!empty($testOutput) && strpos($testOutput, 'Composer') !== false) {
-            return 'composer'; // It's in PATH
-        }
-
-        // Strategy 4: Try common shared hosting paths
-        $commonPaths = [
-            '/usr/local/bin/composer',
-            '/usr/bin/composer',
-            '/bin/composer',
-            '/opt/cpanel/composer/bin/composer', // cPanel
-            '/home/composer/composer.phar',      // Some shared hosts
-            // Add Homebrew paths for local development
-            '/opt/homebrew/bin/composer',        // Apple Silicon Mac
-            '/usr/local/bin/composer',           // Intel Mac
-        ];
-
-        foreach ($commonPaths as $path) {
-            if (is_executable($path)) {
-                return escapeshellarg($path);
-            }
-        }
-
-        // Strategy 5: Look for PHP and try to download composer.phar if we have write permissions
-        if (is_writable(base_path())) {
-            $this->line('<fg=yellow>Composer not found. Attempting to download composer.phar...</fg=yellow>');
-            return $this->downloadComposerPhar();
-        }
-
-        return false;
-    }
-
-    /**
-     * Find the CLI PHP binary (not FPM)
-     *
-     * @return string
-     */
-    protected function findCliPhpBinary()
-    {
-        // If current PHP_BINARY is FPM, find the CLI version
-        if (strpos(PHP_BINARY, 'fpm') !== false) {
-            // For Herd on macOS, try to find the CLI version
-            $phpVersion = PHP_MAJOR_VERSION . PHP_MINOR_VERSION; // e.g., "83"
-
-            $cliPaths = [
-                // Herd CLI paths
-                str_replace('php' . $phpVersion . '-fpm', 'php' . $phpVersion, PHP_BINARY),
-                str_replace('-fpm', '', PHP_BINARY),
-
-                // System paths
-                '/usr/bin/php',
-                '/usr/local/bin/php',
-                '/opt/homebrew/bin/php',
-
-                // Herd alternative paths
-                '/Users/' . get_current_user() . '/Library/Application Support/Herd/bin/php' . $phpVersion,
-
-                // Generic
-                'php'
-            ];
-
-            foreach ($cliPaths as $path) {
-                if (is_executable($path)) {
-                    // Test if it's CLI (not FPM)
-                    $test = @shell_exec(escapeshellarg($path) . ' --version 2>/dev/null');
-                    if (!empty($test) && strpos($test, 'PHP') !== false && strpos($test, 'fpm') === false) {
-                        return $path;
-                    }
-                }
-            }
-        }
-
-        // Fallback: try the current PHP_BINARY anyway
-        return PHP_BINARY;
-    }
-
-    /**
-     * Download composer.phar
-     *
-     * @return string|false
-     */
-    protected function downloadComposerPhar()
-    {
-        try {
-            $composerPharPath = base_path('composer.phar');
-
-            // Download composer installer
-            $installer = file_get_contents('https://getcomposer.org/installer');
-            if (!$installer) {
-                return false;
-            }
-
-            // Run installer to create composer.phar
-            $tempInstaller = base_path('composer-installer.php');
-            file_put_contents($tempInstaller, $installer);
-
-            $phpBinary = escapeshellarg($this->findCliPhpBinary());
-            $installerPath = escapeshellarg($tempInstaller);
-            $output = shell_exec($phpBinary . ' ' . $installerPath . ' 2>&1');
-            unlink($tempInstaller);
-
-            if (file_exists($composerPharPath)) {
-                $this->line('<fg=green>✅ Successfully downloaded composer.phar</fg=green>');
-                return $phpBinary . ' ' . escapeshellarg($composerPharPath);
-            }
-
-            return false;
-        } catch (Exception $e) {
-            return false;
-        }
-    }
-
-    /**
-     * Display output with reasonable limits
-     *
-     * @param string $output
-     */
-    protected function displayOutput($output)
-    {
-        $lines = explode("\n", trim($output));
-
-        // Don't truncate for composer - users need full output
-        foreach ($lines as $line) {
-            $this->line($line);
-        }
-    }
-
-    /**
-     * Show help when Composer is not found
-     */
-    protected function showComposerNotFoundHelp()
-    {
-        $this->line('<fg=red>❌ Composer not found</fg=red>');
+        $this->line('<fg=cyan>Composer Web Terminal</fg=cyan> (shell gerektirmez)');
         $this->line('');
-        $this->line('<fg=yellow>For Shared Hosting:</fg=yellow>');
-        $this->line('1. Download composer.phar from https://getcomposer.org/composer.phar');
-        $this->line('2. Upload to: ' . base_path());
+        $this->line('<fg=green>Paket bilgisi:</fg=green>');
+        $this->line('  <fg=yellow>composer show [paket]</fg=yellow>       Kurulu paketleri listele');
+        $this->line('  <fg=yellow>composer outdated</fg=yellow>           Güncellemeleri denetle (Packagist)');
         $this->line('');
-        $this->line('<fg=yellow>For Local Development:</fg=yellow>');
-        $this->line('1. Install via Homebrew: brew install composer');
-        $this->line('2. Or download from: https://getcomposer.org/');
+        $this->line('<fg=green>Bağımlılık yönetimi (gömülü Composer):</fg=green>');
+        $this->line('  <fg=yellow>composer install</fg=yellow>            composer.lock\'a göre paketleri kur');
+        $this->line('  <fg=yellow>composer require vendor/paket</fg=yellow>  Paket ekle');
+        $this->line('  <fg=yellow>composer remove vendor/paket</fg=yellow>   Paket kaldır');
+        $this->line('  <fg=yellow>composer update [vendor/paket]</fg=yellow> Paketleri güncelle');
+        $this->line('  <fg=yellow>composer dump-autoload</fg=yellow>      Autoload dosyalarını yeniden üret');
+        $this->line('  <fg=yellow>composer clear-cache</fg=yellow>        Composer önbelleğini temizle');
         $this->line('');
-        $this->line('<fg=blue>Once available, you can use any Composer command!</fg=blue>');
-    }
-
-    /**
-     * Show available Composer commands
-     */
-    protected function showHelp()
-    {
-        $this->line('<fg=cyan>Full-Featured Composer Terminal</fg=cyan>');
-        $this->line('');
-        $this->line('<fg=green>All Composer commands are available:</fg=green>');
-        $this->line('');
-        $this->line('<fg=blue>Package Management:</fg=blue>');
-        $this->line('  composer install                Install dependencies');
-        $this->line('  composer update                 Update dependencies');
-        $this->line('  composer require vendor/package Add new package');
-        $this->line('  composer remove vendor/package  Remove package');
-        $this->line('  composer show                   List packages');
-        $this->line('  composer outdated               Show outdated packages');
-        $this->line('');
-        $this->line('<fg=blue>Information & Validation:</fg=blue>');
-        $this->line('  composer --version              Show Composer version');
-        $this->line('  composer validate               Validate composer.json');
-        $this->line('  composer check-platform-reqs   Check requirements');
-        $this->line('  composer diagnose               Diagnose issues');
-        $this->line('  composer show vendor/package    Show package details');
-        $this->line('');
-        $this->line('<fg=blue>Maintenance:</fg=blue>');
-        $this->line('  composer dump-autoload          Regenerate autoloader');
-        $this->line('  composer clear-cache            Clear cache');
-        $this->line('  composer self-update            Update Composer');
-        $this->line('');
-        $this->line('<fg=yellow>💪 Full power for shared hosting management!</fg=yellow>');
-        $this->line('<fg=red>⚠️  Use with caution on production sites</fg=red>');
+        $this->line('<fg=green>Notlar:</fg=green>');
+        $this->line('  - Komutlar --no-scripts ile çalışır; package:discover otomatik tetiklenir.');
+        $this->line('  - Paketler --prefer-dist ile (zip) kurulur; git kaynaklı dev-* paketler desteklenmez.');
+        $this->line('  - Kapsamlı "update" işlemleri hostun bellek/süre limitine takılabilir.');
     }
 }
