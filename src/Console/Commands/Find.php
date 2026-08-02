@@ -5,6 +5,7 @@ namespace Recca0120\Terminal\Console\Commands;
 use Exception;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
+use Recca0120\Terminal\Console\Commands\Concerns\ResolvesProjectPath;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -14,6 +15,8 @@ use Symfony\Component\Finder\Finder;
 
 class Find extends Command
 {
+    use ResolvesProjectPath;
+
     /**
      * The console command name.
      *
@@ -76,14 +79,19 @@ class Find extends Command
      */
     public function handle()
     {
-        $path = $this->argument('path');
+        $argument = $this->argument('path');
         $name = $this->option('name');
         $type = $this->option('type');
         $maxDepth = $this->option('maxdepth');
         $delete = filter_var($this->option('delete'), FILTER_VALIDATE_BOOLEAN);
 
-        $root = function_exists('base_path') === true ? base_path() : getcwd();
-        $path = rtrim($root, '/').'/'.$path;
+        $path = $this->resolveProjectPath($argument);
+
+        if ($path === null) {
+            $this->outsideProjectError($argument);
+
+            return 1;
+        }
 
         $this->finder->in($path);
 
@@ -104,7 +112,7 @@ class Find extends Command
             if ((int) $maxDepth === 0) {
                 $this->line($path);
 
-                return;
+                return 0;
             }
             $this->finder->depth('<'.$maxDepth);
         }
@@ -126,6 +134,8 @@ class Find extends Command
                 $this->line($pathname);
             }
         }
+
+        return 0;
     }
 
     /**

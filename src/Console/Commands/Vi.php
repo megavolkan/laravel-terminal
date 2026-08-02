@@ -5,11 +5,14 @@ namespace Recca0120\Terminal\Console\Commands;
 use Illuminate\Contracts\Filesystem\FileNotFoundException;
 use Illuminate\Filesystem\Filesystem;
 use InvalidArgumentException;
+use Recca0120\Terminal\Console\Commands\Concerns\ResolvesProjectPath;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 
 class Vi extends Command
 {
+    use ResolvesProjectPath;
+
     /**
      * The console command name.
      *
@@ -49,16 +52,24 @@ class Vi extends Command
      */
     public function handle()
     {
-        $path = $this->argument('path');
+        $argument = $this->argument('path');
         $text = $this->option('text');
-        $root = function_exists('base_path') === true ? base_path() : getcwd();
-        $path = rtrim($root, '/').'/'.$path;
+
+        $path = $this->resolveProjectPath($argument);
+
+        if ($path === null) {
+            $this->outsideProjectError($argument);
+
+            return 1;
+        }
 
         if ($text !== null) {
             $this->files->put($path, $text);
         } else {
             $this->line($this->files->get($path));
         }
+
+        return 0;
     }
 
     /**

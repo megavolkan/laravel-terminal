@@ -42,6 +42,35 @@ class ViTest extends TestCase
         $files->shouldHaveReceived('put')->with('foo/foo', $text)->once();
     }
 
+    public function test_read_rejects_path_outside_project()
+    {
+        $files = m::spy(Filesystem::class);
+
+        $command = new Vi($files);
+        $command->setLaravel($this->getContainer());
+
+        $commandTester = new CommandTester($command);
+        $exitCode = $commandTester->execute(['path' => '../../../etc/passwd']);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('proje dizininin dışında', $commandTester->getDisplay());
+        $files->shouldNotHaveReceived('get');
+    }
+
+    public function test_write_rejects_path_outside_project()
+    {
+        $files = m::spy(Filesystem::class);
+
+        $command = new Vi($files);
+        $command->setLaravel($this->getContainer());
+
+        $commandTester = new CommandTester($command);
+        $exitCode = $commandTester->execute(['path' => '../evil.php', '--text' => '<?php evil();']);
+
+        self::assertSame(1, $exitCode);
+        $files->shouldNotHaveReceived('put');
+    }
+
     /**
      * @return Container
      */
