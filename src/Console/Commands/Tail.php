@@ -4,11 +4,14 @@ namespace Recca0120\Terminal\Console\Commands;
 
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Collection;
+use Recca0120\Terminal\Console\Commands\Concerns\ResolvesProjectPath;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
 
 class Tail extends Command
 {
+    use ResolvesProjectPath;
+
     /**
      * The console command name.
      *
@@ -48,28 +51,44 @@ class Tail extends Command
     public function handle()
     {
         $path = $this->argument('path');
-        $lines = (int) $this->option('lines');
+        $lines = max(1, (int) $this->option('lines'));
 
         if (empty($path) === false) {
-            $root = function_exists('base_path') === true ? base_path() : getcwd();
-            $file = rtrim($root, '/').'/'.$path;
-        } else {
-            $path = function_exists('storage_path') === true ? storage_path() : getcwd();
-            $path = rtrim($path, '/').'/';
+            $file = $this->resolveProjectPath($path);
 
-            $file = (new Collection($this->files->glob($path.'logs/*.log')))
-                ->map(function ($file) {
-                    return is_file($file) === true ? $file : false;
+            if ($file === null) {
+                $this->outsideProjectError($path);
+
+                return 1;
+            }
+        } else {
+            $storage = function_exists('storage_path') === true ? storage_path() : getcwd();
+            $storage = rtrim($storage, '/').'/';
+
+            $file = (new Collection($this->files->glob($storage.'logs/*.log')))
+                ->filter(function ($file) {
+                    return is_file($file);
                 })->sortByDesc(function ($file) {
-                    return filectime($file);
+                    return filemtime($file);
                 })->first();
+
+            if ($file === null) {
+                $this->error('tail: '.$storage.'logs dizininde okunabilir bir .log dosyası yok');
+
+                return 1;
+            }
         }
 
         $this->readLine($file, $lines);
+
+        return 0;
     }
 
     /**
-     * readLine.
+     * Dosyanın SON $lines satırını yazar.
+     *
+     * Dosya sonundan başlayıp geriye doğru parça parça okunur; böylece
+     * büyük log dosyaları belleğe tümüyle yüklenmez.
      *
      * @param  string  $file
      * @param  int  $lines
@@ -83,19 +102,32 @@ class Tail extends Command
         }
 
         $fp = fopen($file, 'rb');
-        $i = 1;
-        $result = [];
-        while (! feof($fp)) {
-            if ($i > $lines) {
-                break;
-            }
-            $content = fgets($fp);
-            $result[] = $content;
-            $i++;
+
+        if ($fp === false) {
+            $this->error('tail: cannot open ‘'.$file.'’ for reading: Permission denied');
+
+            return;
         }
+
+        $chunkSize = 4096;
+        $buffer = '';
+
+        fseek($fp, 0, SEEK_END);
+        $position = ftell($fp);
+
+        // Aranan satır sayısına ulaşana ya da dosya başına varana kadar geri git
+        while ($position > 0 && substr_count($buffer, "\n") <= $lines) {
+            $read = (int) min($chunkSize, $position);
+            $position -= $read;
+            fseek($fp, $position, SEEK_SET);
+            $buffer = fread($fp, $read).$buffer;
+        }
+
         fclose($fp);
 
-        $this->line(implode('', $result));
+        $all = explode("\n", rtrim($buffer, "\n"));
+
+        $this->line(implode("\n", array_slice($all, -$lines)));
     }
 
     /**

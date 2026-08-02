@@ -99,13 +99,41 @@ class TailTest extends TestCase
         self::assertStringContainsString('1.log', $commandTester->getDisplay());
     }
 
+    public function test_tail_returns_last_lines_not_first()
+    {
+        $root = vfsStream::setup('root', null, [
+            'app.log' => "satir1\nsatir2\nsatir3\nsatir4\nsatir5\nsatir6\nsatir7\nSON\n",
+        ]);
+
+        $commandTester = new CommandTester($this->getCommandForRoot($root));
+        $commandTester->execute(['path' => 'app.log', '--lines' => 3]);
+
+        $display = $commandTester->getDisplay();
+
+        self::assertStringContainsString('SON', $display);
+        self::assertStringContainsString('satir6', $display);
+        self::assertStringNotContainsString('satir1', $display);
+    }
+
+    public function test_tail_rejects_path_outside_project()
+    {
+        $root = vfsStream::setup('root', null, ['app.log' => "foo\n"]);
+
+        $commandTester = new CommandTester($this->getCommandForRoot($root));
+        $exitCode = $commandTester->execute(['path' => '../../etc/passwd']);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('proje dizininin dışında', $commandTester->getDisplay());
+    }
+
     protected function giveRoot()
     {
         $root = vfsStream::setup('root', null, $this->structure);
         $i = 0;
         foreach ($this->structure as $directory => $files) {
             foreach ($files as $file => $content) {
-                $root->getChild($directory.'/'.$file)->lastAttributeModified(time() + $i);
+                // En yeni log dosyası artık filemtime'a göre seçiliyor
+                $root->getChild($directory.'/'.$file)->lastModified(time() + $i);
                 $i++;
             }
         }
@@ -118,7 +146,14 @@ class TailTest extends TestCase
      */
     private function getCommand()
     {
-        $root = $this->giveRoot();
+        return $this->getCommandForRoot($this->giveRoot());
+    }
+
+    /**
+     * @return Tail
+     */
+    private function getCommandForRoot($root)
+    {
         $container = m::mock(new Container);
         $container->shouldReceive('basePath')->andReturn($root->url());
         $container->shouldReceive('runningUnitTests')->andReturn(false);
