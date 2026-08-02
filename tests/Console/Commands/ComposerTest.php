@@ -70,6 +70,21 @@ class ComposerTest extends TestCase
         self::assertSame(0, $exitCode);
     }
 
+    /**
+     * Regresyon: kullanıcı filtreyi tırnaklarsa (show "composer/") normalizasyon
+     * yalnızca en dıştaki çifti soyar; iç tırnaklar filtreden temizlenmezse
+     * eşleşme bulunamaz.
+     */
+    public function test_show_filter_ignores_surrounding_quotes()
+    {
+        $commandTester = $this->getCommandTester();
+
+        $exitCode = $commandTester->execute(['--command' => 'show "composer/"'], []);
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('composer/composer', $commandTester->getDisplay());
+    }
+
     public function test_show_reads_installed_packages()
     {
         $commandTester = $this->getCommandTester();

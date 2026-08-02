@@ -308,8 +308,10 @@ class Composer extends Command implements TerminalCommand
         }
 
         // Paket adına göre filtrele: composer show vendor/package
-        $filter = $parts[1] ?? null;
-        if ($filter) {
+        // Kullanıcı argümanı tırnaklamış olabilir (show "psr/"); normalizasyon
+        // yalnızca en dıştaki çifti soyduğu için burada da temizlenir.
+        $filter = trim($parts[1] ?? '', '"\'');
+        if ($filter !== '') {
             $packages = array_filter($packages, fn ($p) => str_contains($p['name'], $filter));
         }
 
