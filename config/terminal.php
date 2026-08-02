@@ -1,20 +1,54 @@
 <?php
 
 return [
-    // Enable/disable the terminal completely
-    // true = always enabled
-    // false = always disabled  
-    // env('APP_DEBUG', false) = enabled only when APP_DEBUG is true
-    'enabled' => env('APP_DEBUG', false),
-    
-    // IP addresses allowed to access terminal (only used if 'enabled' is not explicitly true/false)
-    'whitelists' => ['127.0.0.1', '::1', '10.0.2.2', '192.168.1.1'],
-    
+    /*
+    |--------------------------------------------------------------------------
+    | Terminali Etkinleştir
+    |--------------------------------------------------------------------------
+    |
+    | Terminal varsayılan olarak KAPALIDIR. Açmak için .env dosyasına
+    | TERMINAL_ENABLED=true ekleyin.
+    |
+    | Bu ayar tek başına yeterli DEĞİLDİR: aşağıdaki 'whitelists' ve
+    | 'middleware' kontrolleri de geçilmelidir. Terminal, sunucuda rastgele
+    | PHP kodu ve SQL çalıştırabildiği için canlı ortamda mutlaka kimlik
+    | doğrulamasıyla birlikte kullanılmalıdır.
+    |
+    */
+    'enabled' => env('TERMINAL_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | IP Beyaz Listesi
+    |--------------------------------------------------------------------------
+    |
+    | Terminale erişebilecek IP adresleri. Liste BOŞ bırakılırsa IP kontrolü
+    | yapılmaz ve erişim yalnızca 'middleware' ayarına bağlı kalır.
+    |
+    | Not: Sunucu bir proxy/CDN arkasındaysa Laravel'in TrustProxies
+    | ayarı doğru yapılmadan istemci IP'si güvenilir değildir.
+    |
+    */
+    'whitelists' => [
+        '127.0.0.1',
+        '::1',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Ayarları
+    |--------------------------------------------------------------------------
+    |
+    | Canlı ortamda 'middleware' dizisine mutlaka bir kimlik doğrulama
+    | katmanı ekleyin; örneğin ['web', 'auth'] veya kendi middleware'iniz.
+    |
+    */
     'route' => [
         'prefix' => 'terminal',
         'as' => 'terminal.',
         'middleware' => ['web'],
     ],
+
     'commands' => [
         \Recca0120\Terminal\Console\Commands\Artisan::class,
         \Recca0120\Terminal\Console\Commands\ArtisanTinker::class,
