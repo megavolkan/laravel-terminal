@@ -1,13 +1,16 @@
 # Laravel Terminal - Enhanced Version
 
-Laravel 11/12/13 compatible web terminal with full Composer support and Filament authentication.
+Laravel 11/12/13 compatible web terminal with full Composer support, designed for
+shared hosting where shell functions are disabled.
+
+Requires PHP 8.2, 8.3 or 8.4.
 
 ## Features
 
 - ✅ Laravel 11/12/13 compatibility
 - ✅ Full Composer support, running in-process — no shell functions required
 - ✅ Smart Tinker with auto-fixes for quotes and namespaces
-- ✅ Filament authentication integration
+- ✅ Works behind any authentication middleware (a Filament panel guard is shown below)
 - ✅ Shared hosting compatible
 - ✅ No SSH required
 
@@ -40,7 +43,11 @@ composer require recca0120/terminal:dev-master
 php artisan vendor:publish --provider="Recca0120\Terminal\TerminalServiceProvider"
 ```
 
-### 3. Create Filament Auth Middleware
+### 3. Create an Auth Middleware
+
+The package ships no authentication of its own — you supply the guard. The
+example below sends unauthenticated visitors to a Filament panel's login page;
+adapt the redirect (or swap in Laravel's own `auth` middleware) to match your app.
 
 ```bash
 php artisan make:middleware FilamentTerminalAuth
@@ -122,8 +129,8 @@ disabled. `composer.phar` is **not** used and is not needed.
 ## Usage
 
 - Access terminal at: `/terminal`
-- Must be logged into Filament admin panel first
-- Composer: `composer install`, `require`, `remove`, `update`, `show`, `outdated`, `dump-autoload`
+- Must satisfy the auth middleware you registered in step 3 first
+- Composer: `composer install`, `require`, `remove`, `update`, `show`, `outdated`, `dump-autoload`, `clear-cache`
 - Smart Tinker: `tinker User::count()`, `tinker config(app.name)`
 
 ## Security
@@ -146,7 +153,9 @@ control and is frequently left enabled by accident on shared hosts.
 
 - **Artisan**: All Laravel artisan commands
 - **Tinker**: Interactive PHP with smart auto-corrections
-- **Composer**: Full Composer functionality
+- **Composer**: dependency management in-process; commands needing a shell or a
+  prompt (`exec`, `global`, `run-script`, `self-update`, `create-project`,
+  `browse`, `home`) are blocked
 - **System**: find, tail, cleanup, vi, mysql
 
 ## Troubleshooting
@@ -165,4 +174,4 @@ locally and upload `composer.lock`, then run `composer install` here.
 
 ## Credits
 
-Enhanced version of [recca0120/laravel-terminal](https://github.com/recca0120/laravel-terminal) with Laravel 11/12 compatibility and additional features.
+Enhanced version of [recca0120/laravel-terminal](https://github.com/recca0120/laravel-terminal) with Laravel 11/12/13 compatibility and additional features.
