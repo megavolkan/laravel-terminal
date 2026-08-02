@@ -4,7 +4,6 @@ namespace Recca0120\Terminal\Tests\Console\Commands;
 
 use Illuminate\Container\Container;
 use Illuminate\Events\Dispatcher;
-use InvalidArgumentException;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Mockery as m;
 use PHPUnit\Framework\TestCase;
@@ -65,18 +64,18 @@ class ArtisanTest extends TestCase
 
     public function test_not_supported_command()
     {
-        $this->expectException(InvalidArgumentException::class);
-
         $laravel = $this->getLaravel();
         $kernel = m::mock($this->getKernel($laravel));
-        $kernel->shouldReceive('handle');
+        $kernel->shouldReceive('handle')->never();
 
         $command = new Artisan($kernel);
         $command->setLaravel($laravel);
         $commandTester = new CommandTester($command);
 
-        $commandTester->execute(['--command' => 'down'], []);
-        $commandTester->assertCommandIsSuccessful();
+        $exitCode = $commandTester->execute(['--command' => 'down'], []);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('not supported', $commandTester->getDisplay());
     }
 
     /**
