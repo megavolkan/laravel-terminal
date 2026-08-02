@@ -39,7 +39,7 @@ class Composer extends Command implements TerminalCommand
 
     public function handle(): int
     {
-        $commandLine = trim($this->option('command') ?? '');
+        $commandLine = $this->normalizeCommandLine($this->option('command'));
 
         if ($commandLine === '') {
             $this->showHelp();
@@ -66,6 +66,37 @@ class Composer extends Command implements TerminalCommand
         }
 
         return $this->runEmbeddedComposer($name, $commandLine);
+    }
+
+    /**
+     * Web terminalinden gelen komut satırını temizler.
+     *
+     * JS tarafı argümanı her zaman --command="..." biçiminde, tırnaklar dahil
+     * gönderir (resources/ts/command.ts). Değer boşluk içeriyorsa
+     * Application::call() bir kez daha tırnaklar; sonuçta komuta literal
+     * tırnaklarla '"require psr/clock"' ulaşır ve Symfony bunun tamamını
+     * komut adı sanar. ArtisanTinker de aynı temizliği yapar.
+     */
+    protected function normalizeCommandLine(?string $command): string
+    {
+        $command = trim((string) $command);
+
+        if (str_starts_with($command, '--command=')) {
+            $command = trim(substr($command, strlen('--command=')));
+        }
+
+        if (strlen($command) >= 2) {
+            $first = $command[0];
+            $last = substr($command, -1);
+
+            if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                $command = substr($command, 1, -1);
+            }
+        }
+
+        $command = str_replace(['\\"', "\\'"], ['"', "'"], $command);
+
+        return trim($command);
     }
 
     // -------------------------------------------------------------------------

@@ -44,6 +44,32 @@ class ComposerTest extends TestCase
         self::assertStringContainsString('Composer', $commandTester->getDisplay());
     }
 
+    /**
+     * Regresyon: JS argümanı --command="..." biçiminde tırnaklarla gönderir
+     * ve Application::call() boşluk içeren değeri bir kez daha tırnaklar.
+     * Tırnaklar soyulmazsa Symfony komut satırının tamamını komut adı sanıp
+     * 'Command "config --list" is not defined' hatası verir.
+     */
+    public function test_strips_quotes_added_by_the_web_terminal()
+    {
+        $commandTester = $this->getCommandTester();
+
+        $exitCode = $commandTester->execute(['--command' => '"config --list"'], []);
+
+        self::assertStringNotContainsString('is not defined', $commandTester->getDisplay());
+        self::assertSame(0, $exitCode);
+    }
+
+    public function test_strips_leaked_command_prefix()
+    {
+        $commandTester = $this->getCommandTester();
+
+        $exitCode = $commandTester->execute(['--command' => '--command="config --list"'], []);
+
+        self::assertStringNotContainsString('is not defined', $commandTester->getDisplay());
+        self::assertSame(0, $exitCode);
+    }
+
     public function test_show_reads_installed_packages()
     {
         $commandTester = $this->getCommandTester();
